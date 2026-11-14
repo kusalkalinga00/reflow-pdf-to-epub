@@ -44,4 +44,10 @@ library call so it can be tested without a running service.
 ```
 cmd/reflow/          CLI entry point
 internal/version/    build metadata
+internal/idm/        intermediate document model (extraction → assembly)
+internal/epub/       EPUB 3 writer: container, package, nav, NCX, archive
 ```
+
+The EPUB writer enforces the parts readers and validators actually check: `mimetype`
+first and stored with no extra field, a package document that lists every archive
+member, a nav document with a table of contents, and accessibility metadata.
