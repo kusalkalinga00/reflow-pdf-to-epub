@@ -20,6 +20,12 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install PDFium
+        run: |
+          ./scripts/pdfium.sh
+          echo "PKG_CONFIG_PATH=$PWD/.pdfium/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$PWD/.pdfium/lib" >> "$GITHUB_ENV"
+
       - name: Check formatting
         run: |
           unformatted="$(gofmt -l .)"
