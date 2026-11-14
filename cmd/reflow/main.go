@@ -22,6 +22,7 @@ usage:
   reflow <command> [arguments]
 
 commands:
+  convert   convert a PDF into an EPUB
   extract   recover text and print the intermediate document model
   inspect   report the structure and metadata of a PDF
   version   print build version information
@@ -43,6 +44,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	switch args[0] {
+	case "convert":
+		return convert(args[1:], stdout, stderr)
 	case "extract":
 		return extractDoc(args[1:], stdout, stderr)
 	case "inspect":

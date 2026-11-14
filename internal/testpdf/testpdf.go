@@ -12,6 +12,14 @@ import (
 
 type config struct {
 	mediaBox func(page int) string
+	lines    []Line
+}
+
+// Line is one line of text drawn on the first page.
+type Line struct {
+	Text string
+	Size float64
+	X, Y float64
 }
 
 // Option customises Build.
@@ -21,6 +29,12 @@ type Option func(*config)
 // 1-based.
 func WithMediaBox(fn func(page int) string) Option {
 	return func(c *config) { c.mediaBox = fn }
+}
+
+// WithLines replaces the first page's content with the given lines, each drawn
+// at its own size. It is what makes heading detection testable end to end.
+func WithLines(lines ...Line) Option {
+	return func(c *config) { c.lines = lines }
 }
 
 // Build returns a PDF with the given number of pages, each carrying a single
@@ -54,6 +68,9 @@ func Build(pages int, opts ...Option) []byte {
 		kids = append(kids, fmt.Sprintf("%d 0 R", pageNum))
 
 		stream := fmt.Sprintf("BT /F1 24 Tf 72 720 Td (Page %d) Tj ET", i+1)
+		if i == 0 && len(cfg.lines) > 0 {
+			stream = contentStream(cfg.lines)
+		}
 		objects[pageNum] = fmt.Sprintf(
 			"<< /Type /Page /Parent %d 0 R /MediaBox %s /Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>",
 			pagesObj, cfg.mediaBox(i+1), font, contentNum,
@@ -86,4 +103,21 @@ func Build(pages int, opts ...Option) []byte {
 		maxObj+1, catalog, info, xrefAt)
 
 	return buf.Bytes()
+}
+
+func contentStream(lines []Line) string {
+	var b strings.Builder
+	for _, l := range lines {
+		size := l.Size
+		if size <= 0 {
+			size = 12
+		}
+		fmt.Fprintf(&b, "BT /F1 %.2f Tf %.2f %.2f Td (%s) Tj ET\n", size, l.X, l.Y, escapeText(l.Text))
+	}
+	return b.String()
+}
+
+// escapeText escapes the three characters that are special inside a PDF string.
+func escapeText(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `(`, `\(`, `)`, `\)`).Replace(s)
 }

@@ -1,0 +1,191 @@
+package render
+
+import (
+	"math"
+	"sort"
+	"strings"
+
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
+)
+
+// Paragraph is a run of consecutive line blocks that belong together.
+//
+// Extraction produces one block per visual line. Merging them is the first
+// piece of structure the reader actually notices: a book rendered as one
+// paragraph per line is technically readable and unpleasant to read.
+type Paragraph struct {
+	Kind     idm.Kind // KindParagraph or KindHeading
+	Level    int      // 1..3, headings only
+	Text     string
+	Page     int
+	Box      idm.Rect
+	FontSize float64
+}
+
+// GroupParagraphs merges line blocks into paragraphs and classifies headings.
+//
+// The heading rule is deliberately simple: a paragraph is a heading when it is
+// at least 1.2x the body text size and short enough to be a title. The layout
+// stage will replace this with a rule that uses position and surrounding
+// context as well; until then, a conservative rule beats no structure at all.
+func GroupParagraphs(blocks []idm.Block) []Paragraph {
+	var out []Paragraph
+
+	for _, b := range blocks {
+		if b.Kind.IsFurniture() {
+			continue
+		}
+		if text := strings.TrimSpace(b.Text); text == "" {
+			continue
+		}
+
+		if n := len(out); n > 0 && shouldMerge(out[n-1], b) {
+			out[n-1] = merge(out[n-1], b)
+			continue
+		}
+
+		out = append(out, Paragraph{
+			Kind:     idm.KindParagraph,
+			Text:     strings.TrimSpace(b.Text),
+			Page:     b.Page,
+			Box:      b.BBox,
+			FontSize: b.FontSize,
+		})
+	}
+
+	classifyHeadings(out)
+	return out
+}
+
+// shouldMerge reports whether next continues the paragraph that prev ends.
+func shouldMerge(prev Paragraph, next idm.Block) bool {
+	if next.Kind != idm.KindParagraph || prev.Page != next.Page {
+		return false
+	}
+	if prev.FontSize <= 0 || next.FontSize <= 0 {
+		return false
+	}
+
+	// A size change means a different role: a heading, a caption, a footnote.
+	if math.Abs(prev.FontSize-next.FontSize) > 0.15*math.Max(prev.FontSize, next.FontSize) {
+		return false
+	}
+
+	// Positive gap means next sits below prev. Overlap or reordering is not a
+	// continuation.
+	gap := prev.Box.Y0 - next.BBox.Y1
+	lineHeight := math.Max(prev.FontSize, next.FontSize)
+	if gap < -0.5*lineHeight {
+		return false
+	}
+
+	// Normal leading leaves a gap well under one em; a paragraph break adds
+	// roughly a line, so the threshold separates the two cases.
+	return gap <= 0.75*lineHeight
+}
+
+func merge(prev Paragraph, next idm.Block) Paragraph {
+	prev.Text = joinText(prev.Text, next.Text)
+	prev.Box = idm.Rect{
+		X0: math.Min(prev.Box.X0, next.BBox.X0),
+		Y0: math.Min(prev.Box.Y0, next.BBox.Y0),
+		X1: math.Max(prev.Box.X1, next.BBox.X1),
+		Y1: math.Max(prev.Box.Y1, next.BBox.Y1),
+	}
+	if next.FontSize > prev.FontSize {
+		prev.FontSize = next.FontSize
+	}
+	return prev
+}
+
+// joinText joins two lines, undoing a hyphenated line break. "exam-" followed
+// by "ple" becomes "example"; everything else joins with a space. The
+// normalisation stage owns the full rule set; this handles the common case
+// without needing a dictionary.
+func joinText(a, b string) string {
+	a = strings.TrimRight(a, " ")
+	b = strings.TrimLeft(b, " ")
+	if a == "" {
+		return b
+	}
+	if b == "" {
+		return a
+	}
+
+	if strings.HasSuffix(a, "-") && isLower(b[0]) {
+		return a[:len(a)-1] + b
+	}
+	return a + " " + b
+}
+
+func isLower(c byte) bool { return c >= 'a' && c <= 'z' }
+
+func classifyHeadings(paras []Paragraph) {
+	if len(paras) == 0 {
+		return
+	}
+
+	body := bodySize(paras)
+	if body <= 0 {
+		return
+	}
+
+	for i := range paras {
+		p := &paras[i]
+		if p.FontSize < 1.2*body {
+			continue
+		}
+		if len([]rune(p.Text)) > 120 {
+			continue
+		}
+
+		p.Kind = idm.KindHeading
+		switch {
+		case p.FontSize >= 1.8*body:
+			p.Level = 1
+		case p.FontSize >= 1.4*body:
+			p.Level = 2
+		default:
+			p.Level = 3
+		}
+	}
+}
+
+// bodySize returns the size that most of the text is set in, weighted by
+// character count rather than paragraph count.
+//
+// A plain median over paragraphs is wrong on short documents: one 20pt title
+// and one 10pt paragraph give a median of 15, which makes the title look
+// ordinary. Weighting by characters answers the actual question - what size is
+// the body text - and stays stable as a book grows.
+func bodySize(paras []Paragraph) float64 {
+	chars := make(map[float64]int, 8)
+	total := 0
+
+	for _, p := range paras {
+		if p.FontSize <= 0 {
+			continue
+		}
+		n := len([]rune(p.Text))
+		chars[p.FontSize] += n
+		total += n
+	}
+	if total == 0 {
+		return 0
+	}
+
+	sizes := make([]float64, 0, len(chars))
+	for size := range chars {
+		sizes = append(sizes, size)
+	}
+	sort.Float64s(sizes)
+
+	seen := 0
+	for _, size := range sizes {
+		seen += chars[size]
+		if seen*2 >= total {
+			return size
+		}
+	}
+	return sizes[len(sizes)-1]
+}
