@@ -1,0 +1,21 @@
+# Build output
+/bin/
+/reflow
+
+# Local conversion artifacts
+/out/
+*.test
+coverage.out
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Corpus material that must never be published
+/corpus/private/
