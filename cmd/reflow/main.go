@@ -11,8 +11,9 @@ import (
 
 // Exit codes are part of the CLI contract: scripts branch on them.
 const (
-	exitOK    = 0
-	exitUsage = 2
+	exitOK      = 0
+	exitFailure = 1
+	exitUsage   = 2
 )
 
 const usageText = `reflow converts PDF files into reflowable EPUB 3 ebooks.
@@ -21,8 +22,9 @@ usage:
   reflow <command> [arguments]
 
 commands:
-  version    print build version information
-  help       print this message
+  inspect   report the structure and metadata of a PDF
+  version   print build version information
+  help      print this message
 
 Conversion commands are added as the engine lands. See PROPOSAL.md.
 `
@@ -40,6 +42,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	switch args[0] {
+	case "inspect":
+		return inspect(args[1:], stdout, stderr)
 	case "version", "-v", "--version":
 		fmt.Fprintln(stdout, version.String())
 		return exitOK
