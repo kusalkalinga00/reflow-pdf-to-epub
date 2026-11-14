@@ -305,46 +305,55 @@ reproducible: same input, same score.
 ## 7. Architecture
 
 ```
-                    ┌──────────────────┐
-   browser ────────▶│  Next.js (web)   │
-                    │  uploader, jobs, │
-                    │  reader preview  │
-                    └────────┬─────────┘
-                             │ JSON / SSE
-                    ┌────────▼─────────┐
-                    │  API (FastAPI)   │
-                    │  auth, quotas,   │
-                    │  presign, jobs   │
-                    └───┬────┬────┬────┘
-                        │    │    │
-             ┌──────────┘    │    └──────────────┐
-             │               │                   │
-      ┌──────▼──────┐  ┌─────▼──────┐   ┌────────▼────────┐
-      │  Postgres   │  │   Redis    │   │  S3-compatible  │
-      │  metadata   │  │  queue +   │   │  object store   │
-      │  jobs       │  │  pub/sub   │   │  uploads/out    │
-      └─────────────┘  └─────┬──────┘   └────────┬────────┘
-                             │                   │
-                      ┌──────▼───────────────────▼──────┐
-                      │        Worker pool               │
-                      │  pool A: CPU (extract, layout)   │
-                      │  pool B: OCR (scanned pages)     │
-                      │  pool C: assembly + validation   │
-                      └──────────────┬──────────────────┘
-                                     │
-                            ┌────────▼─────────┐
-                            │  epubcheck / ace │
-                            │  (subprocess)    │
-                            └──────────────────┘
+                      ┌──────────────────┐
+     browser ────────▶│  Next.js (web)   │
+                      │  uploader, jobs, │
+                      │  reader preview  │
+                      └────────┬─────────┘
+                               │ JSON / SSE
+                      ┌────────▼─────────┐
+                      │    API  (Go)     │
+                      │  auth, quotas,   │
+                      │  presign, jobs   │
+                      └───┬────┬────┬────┘
+                          │    │    │
+               ┌──────────┘    │    └──────────────┐
+               │               │                   │
+        ┌──────▼──────┐  ┌─────▼──────┐   ┌────────▼────────┐
+        │  Postgres   │  │ River job  │   │  S3-compatible  │
+        │  metadata   │  │ queue +    │   │  object store   │
+        │  jobs       │  │ NOTIFY     │   │  uploads/out    │
+        └──────┬──────┘  └─────┬──────┘   └────────┬────────┘
+               └───────┬───────┘                   │
+                       │                           │
+                ┌──────▼───────────────────────────▼──────┐
+                │    Worker pool (one Go binary, N pods)  │
+                │  A: extract + layout   B: OCR           │
+                │  C: assemble + validate                 │
+                └──────┬────────┬──────────────┬──────────┘
+                       │        │              │
+             ┌─────────▼──┐ ┌───▼────────┐ ┌───▼─────────────┐
+             │  pdfium    │ │ tesseract  │ │ epubcheck / ace │
+             │ (sandbox)  │ │ (subproc)  │ │ (subprocess)    │
+             └────────────┘ └────────────┘ └─────────────────┘
 ```
 
 **Principles**
 
 - **Stateless workers.** Any worker can pick up any job; state lives in Postgres +
   object storage. Horizontal scaling is trivial and crashes are survivable.
+- **One binary, one language.** The API and the worker share the same Go module and
+  the same engine packages; the worker is the same binary with a different subcommand.
+  No RPC contract to keep in sync between the web tier and the converter.
+- **Suspicious input never shares a process.** PDFium runs in a sandboxed host process
+  and Tesseract/`epubcheck`/`ace` run as subprocesses, so a parser exploit or a
+  pathological file does not touch the worker's memory space.
 - **Separate queues per stage class.** OCR jobs must not starve fast text jobs.
 - **Stream, don't buffer.** Files go browser → object store via presigned URL; the API
   never proxies large bodies.
+- **One transaction per state change.** The job row and its queue entry are written
+  together, so a crash can never leave a job that is queued but does not exist, or
+  exists but is never picked up.
 - **Deterministic engine version.** Every artifact records the engine version and the
   config hash, so a regression can be reproduced exactly.
 - **Fail closed.** An artifact that fails validation is never downloadable; the user
@@ -449,34 +458,84 @@ Errors are RFC 9457 problem+json with a stable `code`, a human `detail`, and a
 
 ## 10. Tech stack
 
+**Language decision: Go.** The API, the worker, and the conversion engine are one Go
+module. TypeScript handles the browser. Nothing in the request path is interpreted at
+runtime.
+
 | Layer | Choice | Why |
 |---|---|---|
-| Web | Next.js (App Router) + TypeScript + Tailwind | Fast to build, good file upload and streaming story, easy static hosting |
-| API | FastAPI (Python 3.12) | Same language as the conversion engine; async; typed contracts |
-| Engine | Python, pure functions over an IDM | Testable stage-by-stage; no framework coupling |
-| PDF text/drawings | `pdfium` bindings + `pdfminer.six` / `pdfplumber` | Permissive licences; good glyph and font metadata |
-| Layout analysis | `Docling` (or equivalent ML layout model) + custom heuristics | Columns and block type detection far better than rules alone |
-| OCR | Tesseract 5, `ocrmypdf` for page-level pipeline | Mature, offline, no per-page cost |
-| Validation | `epubcheck` (Java, subprocess) + `ace` (Node, subprocess) | Reference implementations; no rewriting a validator |
-| Queue | Redis + RQ (or Celery) | Simple, debuggable, retries built in |
-| DB | Postgres | Boring and correct |
-| Storage | S3-compatible (R2/S3/MinIO) | Presigned uploads, lifecycle expiry |
-| Packaging | Custom EPUB writer | Full control over OPF/nav/page-list; `ebooklib` hides too much |
-| Deploy | Docker Compose → single VM; workers scale separately | Cheap to start, no premature Kubernetes |
+| Web | Next.js (App Router) + TypeScript + Tailwind + shadcn/ui | Fast to build; good upload and streaming story; static hosting |
+| API | Go 1.24, stdlib `net/http` (method+wildcard routing) + `chi` middleware | No framework needed; typed contracts; one binary |
+| Engine | Go packages over an IDM: `internal/{extract,layout,struct,normalize,epub,score}` | Deterministic, testable stage-by-stage, same language as the API |
+| PDF text + rendering | `klippa-app/go-pdfium` (pdfium, BSD-3-Clause) | Per-character boxes, font info, and page rasterisation; permissive licence |
+| PDF structure, encryption, page ops | `pdfcpu/pdfcpu` (Apache-2.0) | Encryption detection, validation, page counts, embedded image extraction |
+| Layout analysis | Own geometry over glyph boxes (`internal/layout`) | Columns and blocks are clustering over rectangles; no ML needed for MVP |
+| OCR | Tesseract 5 as a subprocess, fanned out with `errgroup` | Crash isolation, no CGO in the worker, no per-page cost |
+| XHTML DOM | `beevik/etree` | Real XML tree with escaping handled; no string concatenation |
+| EPUB packaging | stdlib `archive/zip` with an explicit `Store` header | Full control: `mimetype` first, uncompressed, no extra field |
+| DB | Postgres 17 + `pgx/v5` + `sqlc` + `goose` | Typed queries generated from SQL; migrations in version control; no ORM |
+| Queue | `riverqueue/river` (Postgres-backed) | Enqueue lands in the same transaction as the job row; removes Redis entirely |
+| Progress fan-out | Postgres `LISTEN/NOTIFY` → SSE | No pub/sub service to operate at this scale |
+| Object storage | S3/R2 via `aws-sdk-go-v2`; MinIO locally | Presigned uploads, lifecycle expiry |
+| Auth | `alexedwards/scs` sessions + `golang.org/x/oauth2` | Server-side sessions, revocable, no JWT invalidation problem |
+| Logging / metrics | stdlib `log/slog` + OpenTelemetry + Prometheus | Structured logs with job IDs only, never document text |
+| Validation | `epubcheck` (Java) + `@daisy/ace` (Node), subprocess | Reference implementations; do not rewrite a validator |
+| Tests | stdlib `testing`, native fuzzing for the normalization transforms, golden files | Fuzzing is built into the toolchain |
+| Deploy | Multi-stage Docker build → ~30 MB image; Compose on one VM | Fast cold start, low memory per worker, trivial rollback |
 
-### 10.1 Libraries considered and rejected
+### 10.1 Why Go is viable for the engine
+
+This deserves justification, because most PDF tooling in this problem space is Python.
+
+- **PDFium gives us what the heuristics actually need.** Per-character bounding boxes,
+  font name/size/weight per span, and page rasterisation. Column detection, line
+  clustering, heading inference and reading order are all geometry and string work.
+- **The work is CPU-bound and needs fan-out.** Pages, OCR tiles and image encoding are
+  embarrassingly parallel; `errgroup` + a weighted semaphore + `context` deadlines is
+  the natural shape of the pipeline, and `pprof` makes tuning cheap.
+- **Operational weight matters for a conversion service.** One static binary, a ~30 MB
+  image, and tens of megabytes of RSS per worker, versus a 1–2 GB Python image with
+  PyTorch and a 10-second cold start.
+- **The polyglot cost already exists.** `epubcheck` is Java, `ace` is Node, Tesseract is
+  native. Containing all three behind subprocess calls is the same work in any language.
+- **Compile-time contracts.** The IDM is the interface between seven pipeline stages;
+  changing a struct without updating the stages is a build failure, not a 3 a.m. runtime
+  surprise.
+
+### 10.2 What we give up
+
+| Loss | Impact | Mitigation |
+|---|---|---|
+| No Docling/marker equivalent in Go | Hard layouts (magazines, dense tables) score worse than an ML pipeline | Heuristics beat generic models on clean digital PDFs; IDM is serialisable so an ML stage can be added out-of-process (below) |
+| No `pdfplumber`-grade table detection | Tables flatten to text in MVP | Tables are already v1.1 scope; emit a `TABLE_FLATTENED` issue so the score is honest |
+| Thinner PDF test tooling | Fewer off-the-shelf fixtures | We were building our own corpus and harness anyway (§12) |
+| Smaller talent pool for Go+PDF | Slower ramp for a collaborator | The engine is plain Go with no esoteric dependencies |
+
+**The escape hatch.** `layout-ml` is designed as an optional out-of-process stage: a
+Python sidecar running Docling, speaking gRPC/HTTP, feature-flagged, invoked only for
+books landing on the T2/T3 boundary. The IDM crosses the boundary as JSON. We build it
+only if the week-3 corpus run shows heuristics falling short, and we measure it before
+believing it. If heuristics hold at ≥ 95% on single-column, the sidecar never ships.
+
+### 10.3 Libraries considered and rejected
 
 | Option | Why not |
 |---|---|
-| **PyMuPDF** | Excellent extraction, but AGPL-3.0 — network use would force us to publish the service's source. Commercial licence is an option but a real cost. |
-| **Calibre `ebook-convert`** | Produces EPUBs, but it is a black box: no per-stage diagnostics, GPL-3, and it cannot be tuned for our scoring model. Useful as a *baseline* in the corpus, not as the engine. |
-| **`marker`** | Strong results, but heavyweight GPU dependency and GPL-style licensing constraints. |
-| **`ebooklib`** | Convenient writing, but abstracts away exactly the control we need (page list, accessibility metadata, spine ordering). |
-| **Pandoc** | Great for structured sources, but has no PDF layout analysis. |
+| **`unipdf` (UniDoc)** | The most capable pure-Go PDF library, but AGPL-3.0 without a paid licence — a network service using it must publish its source. |
+| **`go-fitz` (MuPDF bindings)** | MuPDF is AGPL-3.0. Same problem, plus CGO. |
+| **`ledongthuc/pdf`** | Extracts text from simple files, but no font information, no glyph boxes, no rendering — cannot support layout analysis. |
+| **`gosseract`** | Works, but CGO Tesseract in-process means an OCR crash takes the worker down with it. Subprocess gives the same result with isolation. |
+| **`encoding/xml` marshalling for XHTML** | `xmlns:epub` and mixed-content handling get awkward; `etree` builds the tree explicitly. |
+| **`gorm` / `ent`** | The schema is six tables. `sqlc` generates typed code from real SQL with no runtime reflection. |
+| **Calibre `ebook-convert`** | Black box, GPL-3, no per-stage diagnostics. Kept as a corpus baseline for comparison, never as the engine. |
+| **Redis + asynq** | Good queue, but it is a second stateful service and a second source of truth. River keeps enqueue transactional. Revisit only if Postgres queue contention becomes real. |
+| **Pandoc** | Great for structured sources, but no PDF layout analysis. |
 
 > **Licensing is a first-class constraint.** This product is a network service; any
 > AGPL dependency in the request path obliges us to publish the corresponding source.
-> The dependency allowlist is part of the build, enforced in CI.
+> That rules out the two best Go PDF libraries. The dependency allowlist (MIT/BSD/
+> Apache-2.0, with copyleft permitted only across a process boundary) is enforced in
+> CI from week 1.
 
 ---
 
@@ -486,7 +545,8 @@ Errors are RFC 9457 problem+json with a stable `code`, a human `detail`, and a
 
 - Presigned upload/download URLs, short TTL, scoped to one object
 - MIME sniffing and structural PDF validation before parsing; reject polyglots
-- Parsers run in a sandboxed, unprivileged container with a CPU/memory/time budget
+- PDFium parses in a separate host process; every external tool runs as an
+  unprivileged subprocess with a CPU/memory/time budget and no network
 - ClamAV scan on ingest
 - OWASP ASVS L2 for the web app; strict CSP; no inline scripts
 - Zip-bomb and recursion limits on PDF object graphs and image streams
@@ -596,15 +656,16 @@ LLM assist are the features that need metering.
 | # | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|---|
 | R1 | Layout analysis underperforms on real-world messy PDFs | High | High | Ship tiered output (T1/T2/T3) instead of over-promising; corpus-driven tuning; review editor |
-| R2 | AGPL/GPL dependency contaminates a network service | Medium | High | Licence allowlist in CI; process-boundary isolation for copyleft tools |
+| R2 | AGPL/GPL dependency contaminates a network service | Medium | High | Licence allowlist in CI (rules out `unipdf` and `go-fitz`); copyleft tools only across a process boundary |
 | R3 | OCR cost or latency blows the unit economics | Medium | Medium | Per-plan page quotas; pre-flight page-count estimate shown before conversion |
-| R4 | Parser crashes or resource exhaustion on hostile PDFs | Medium | High | Sandbox, budgets, timeouts, fuzzing, fail-closed validation |
+| R4 | Parser crashes or resource exhaustion on hostile PDFs | Medium | High | PDFium in its own host process; container limits; CPU/time budgets; fuzzing; fail-closed validation |
 | R5 | Copyright / DRM misuse by users | Medium | High | Explicit refusal of DRM files, ToS, abuse reporting, no hosting or sharing |
 | R6 | Scope creep into editing, hosting, formats | High | Medium | Written non-goals; MVP checklist is the release gate |
 | R7 | Single-developer bus factor | Medium | Medium | Documented pipeline, corpus + CI as the contract, no tribal knowledge |
 | R8 | Output "valid but unpleasant" | Medium | High | Mandatory human read-through each release; beta feedback loop |
 | R9 | Table and math fidelity disappoint | High | Low | Explicit limitation messaging; image fallback with alt text |
 | R10 | Upload abuse / storage exhaustion | Low | Medium | Quotas, rate limits, TTL sweeper, per-account caps |
+| R11 | No ML layout model in the Go ecosystem | Medium | Medium | Heuristics-first, measured on the corpus at W3; `layout-ml` sidecar exists as a pre-designed escape hatch (§10.2) |
 
 ---
 
@@ -614,13 +675,13 @@ Single developer, part-time (≈25 h/week). Eight weeks to public beta.
 
 | Week | Milestone | Deliverables | Exit criteria |
 |---|---|---|---|
-| **W1** | Foundations | Repo, CI, Docker Compose, corpus v0 (20 PDFs), IDM spec, metric harness | One PDF converts to a technically valid EPUB end-to-end (any quality) |
-| **W2** | Extract & classify | Ingest guard, classification, text/glyph/image extraction, coverage metrics | M1 measurable on corpus; encrypted files fail cleanly |
-| **W3** | Layout | Line/block/column detection, reading order, header/footer removal | M3 met on single column; two-column prototype works |
+| **W1** | Foundations | Go module layout, CI (build/vet/test/race/fuzz), Compose, corpus v0 (20 PDFs), IDM spec, metric harness, licence allowlist | `go run ./cmd/reflow convert` emits a technically valid EPUB end-to-end (any quality) |
+| **W2** | Extract & classify | Ingest guard, classification, pdfium text/glyph/font extraction, coverage metrics | M1 measurable on corpus; encrypted files fail cleanly |
+| **W3** | Layout | Line/block/column detection, reading order, header/footer removal; corpus decides on `layout-ml` sidecar | M3 met on single column; two-column prototype works |
 | **W4** | Structure & normalization | Headings, paragraphs, chapter splitting, ligature/hyphen/Unicode pipeline, page anchors | Structure F1 baseline recorded; TOC generated for clean books |
-| **W5** | Assembly & validation | EPUB writer, OPF/nav/page-list, CSS, cover, `epubcheck` + `ace` in CI | 100% validation pass on corpus; accessibility metadata present |
-| **W6** | Web app | Upload, jobs, SSE progress, download, auth, retention sweeper | A stranger can convert a book unaided |
-| **W7** | OCR & scoring | Tesseract path, mixed-document merge, quality score, tier logic, issue copy | Scanned book converts to T3 with accessible text layer |
+| **W5** | Assembly & validation | EPUB writer (`archive/zip` + `etree`), OPF/nav/page-list, CSS, cover, `epubcheck` + `ace` in CI | 100% validation pass on corpus; accessibility metadata present |
+| **W6** | Web app | Go API + Next.js upload, River jobs, SSE progress, download, auth, retention sweeper | A stranger can convert a book unaided |
+| **W7** | OCR & scoring | Tesseract subprocess pool, mixed-document merge, quality score, tier logic, issue copy | Scanned book converts to T3 with accessible text layer |
 | **W8** | Hardening & beta | Rate limits, quotas, dashboards, error copy, docs, beta deploy | M5–M12 green; 10 external testers onboarded |
 
 **v1.1 window (weeks 9–14):** review editor, tables, footnote linking, batch/API,
@@ -663,7 +724,29 @@ be shown, scope is cut, not the date — with the cut recorded in this document.
 - [ ] Files are deleted on schedule; the sweeper is verified by an automated test
 - [ ] DRM and password-protected files are handled with clear, correct messaging
 - [ ] Errors are diagnosable from a job ID alone (no document content in logs)
-- [ ] The engine runs outside the web app: `convert(input.pdf, out.epub)` in one call
+- [ ] The engine runs outside the web app:
+      `engine.Convert(ctx, file, out, opts) (Artifact, Report, error)`
+
+### 18.1 Engine entry point
+
+The whole pipeline must be reachable from one call, with no HTTP or database in the
+dependency graph. This is what keeps the engine testable and extractable as a library
+or a CLI (`reflow convert book.pdf -o book.epub`).
+
+```go
+type Options struct {
+    Profile   Profile   // generic | kindle | kobo
+    OCR       OCRMode   // auto | force | off
+    PageRange [2]int    // optional 1-based inclusive range
+    LLMAssist bool
+}
+
+// Convert streams a PDF through the pipeline and writes an EPUB.
+// It returns a machine-readable Report even when err != nil, so callers can
+// surface partial diagnostics.
+func Convert(ctx context.Context, src io.ReaderAt, dst io.Writer,
+    opts Options) (Report, error)
+```
 - [ ] Retention, privacy, and licence statements are published
 - [ ] 10 external beta users complete the flow unaided
 
@@ -671,28 +754,49 @@ be shown, scope is cut, not the date — with the cut recorded in this document.
 
 ## Appendix A — Intermediate Document Model (sketch)
 
-```python
-@dataclass
-class Document:
-    meta: Metadata                 # title, author, language, source hash
-    pages: list[Page]              # geometry, provenance: digital | ocr
-    blocks: list[Block]            # ordered, column-tagged
-    structure: list[Node]          # chapters → headings → paragraphs
+```go
+package idm
 
-@dataclass
-class Block:
-    kind: Literal["para", "heading", "list", "table", "figure",
-                  "caption", "code", "footnote", "header", "footer"]
-    text: str
-    level: int | None              # heading level
-    page: int
-    bbox: tuple[float, float, float, float]
-    confidence: float
-    column: int
-    spans: list[Span]              # style runs: bold, italic, mono, superscript, link
+type Document struct {
+	Meta      Metadata  // title, author, language, source hash
+	Pages     []Page    // geometry, provenance: digital | ocr
+	Blocks    []Block   // ordered, column-tagged
+	Structure []Node    // chapters → headings → paragraphs
+}
+
+type BlockKind uint8
+
+const (
+	Para BlockKind = iota
+	Heading
+	List
+	Table
+	Figure
+	Caption
+	Code
+	Footnote
+	Header
+	Footer
+)
+
+type Block struct {
+	Kind       BlockKind
+	Text       string
+	Level      int      // heading level; 0 when not a heading
+	Page       int      // 1-based source page
+	BBox       Rect     // points, PDF user space
+	Confidence float64  // 0..1, feeds the quality score
+	Column     int      // 0-based column index on the page
+	Spans      []Span   // style runs: bold, italic, mono, superscript, link
+}
+
+type Rect struct{ X0, Y0, X1, Y1 float64 }
 ```
 
-Every block keeps `confidence` and its source page, so the report can point at a real
+The IDM is JSON-serialisable on purpose: the optional `layout-ml` sidecar (§10.2) can
+receive and return it without a shared library or a shared language.
+
+Every block keeps `Confidence` and its source page, so the report can point at a real
 page and the review editor can highlight the exact region.
 
 ## Appendix B — Example XHTML output
