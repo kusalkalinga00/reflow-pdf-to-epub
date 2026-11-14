@@ -22,6 +22,7 @@ usage:
   reflow <command> [arguments]
 
 commands:
+  extract   recover text and print the intermediate document model
   inspect   report the structure and metadata of a PDF
   version   print build version information
   help      print this message
@@ -42,6 +43,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	switch args[0] {
+	case "extract":
+		return extractDoc(args[1:], stdout, stderr)
 	case "inspect":
 		return inspect(args[1:], stdout, stderr)
 	case "version", "-v", "--version":
