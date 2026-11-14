@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -98,5 +99,61 @@ func TestConvertRequiresOneArgument(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "usage: reflow convert") {
 		t.Errorf("stderr = %q, want convert usage", stderr.String())
+	}
+}
+
+func TestConvertPutsColumnsInReadingOrder(t *testing.T) {
+	// The source interleaves the columns, which is what a PDF content stream
+	// looks like. The output must read the left column first.
+	pdf := testpdf.Build(1, testpdf.WithLines(
+		testpdf.Line{Text: "Left one.", Size: 12, X: 72, Y: 700},
+		testpdf.Line{Text: "Right one.", Size: 12, X: 320, Y: 700},
+		testpdf.Line{Text: "Left two.", Size: 12, X: 72, Y: 680},
+		testpdf.Line{Text: "Right two.", Size: 12, X: 320, Y: 680},
+		testpdf.Line{Text: "Left three.", Size: 12, X: 72, Y: 660},
+		testpdf.Line{Text: "Right three.", Size: 12, X: 320, Y: 660},
+	))
+
+	dir := t.TempDir()
+	in := filepath.Join(dir, "columns.pdf")
+	if err := os.WriteFile(in, pdf, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "columns.epub")
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"convert", "-q", "-o", out, in}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	zr, err := zip.OpenReader(out)
+	if err != nil {
+		t.Fatalf("open output: %v", err)
+	}
+	defer zr.Close()
+
+	var chapter string
+	for _, f := range zr.File {
+		if f.Name == "OEBPS/text/chapter-001.xhtml" {
+			rc, err := f.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, _ := io.ReadAll(rc)
+			rc.Close()
+			chapter = string(body)
+		}
+	}
+	if chapter == "" {
+		t.Fatal("chapter document not found")
+	}
+
+	left := strings.Index(chapter, "Left three.")
+	right := strings.Index(chapter, "Right one.")
+	if left < 0 || right < 0 {
+		t.Fatalf("chapter is missing text:\n%s", chapter)
+	}
+	if left > right {
+		t.Errorf("right column text appears before the end of the left column:\n%s", chapter)
 	}
 }
