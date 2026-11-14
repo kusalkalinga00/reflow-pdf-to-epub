@@ -30,14 +30,23 @@ No DRM circumvention, no layout preservation, no math OCR, no hosting of books.
 
 ## Development
 
-Requires Go 1.27+.
+Requires Go 1.27+, a C toolchain, and `pkg-config` (`brew install pkgconf`,
+`apt-get install pkg-config`).
 
 ```sh
+make deps       # download the pinned PDFium SDK into .pdfium/ (gitignored)
 make build      # compile to bin/reflow
 make run -- version
 make run -- inspect book.pdf
+make run -- extract book.pdf
 make check      # gofmt, go.mod tidy, vet, tests with -race
 ```
+
+Text extraction goes through PDFium, which is a native library, so the build
+needs CGO. `make deps` fetches a pinned build from `pdfium-binaries` and writes
+the `pkg-config` file that points at it; `build`, `test`, and `check` run it
+automatically. The rpath is baked in, so binaries and test suites run without
+setting `DYLD_LIBRARY_PATH`.
 
 The CLI is a thin shell around `internal/` packages; every pipeline stage is a
 library call so it can be tested without a running service.
@@ -46,6 +55,7 @@ library call so it can be tested without a running service.
 cmd/reflow/          CLI entry point
 internal/version/    build metadata
 internal/ingest/     PDF preflight: size and page limits, validity, encryption
+internal/extract/    PDFium text, line geometry, and coverage
 internal/idm/        intermediate document model (extraction → assembly)
 internal/epub/       EPUB 3 writer: container, package, nav, NCX, archive
 internal/testpdf/    deterministic PDF fixtures for tests
