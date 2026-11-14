@@ -61,6 +61,7 @@ type Metadata struct {
 	Authors    []string `json:"authors,omitempty"`
 	Language   string   `json:"language"`
 	Publisher  string   `json:"publisher,omitempty"`
+	Subject    string   `json:"subject,omitempty"`
 	SourceHash string   `json:"sourceHash,omitempty"`
 	SourceName string   `json:"sourceName,omitempty"`
 }
@@ -100,6 +101,10 @@ type Block struct {
 	// Confidence is 0..1 and records how sure the stage that produced this
 	// block is about its classification. It feeds the quality score.
 	Confidence float64 `json:"confidence"`
+	// FontSize is the effective text size in points. Extraction derives it from
+	// the glyph bounding box, not from the PDF's nominal font size, because
+	// producers routinely draw 10pt text with a 1pt font and a scaling matrix.
+	FontSize float64 `json:"fontSize,omitempty"`
 	// Column is the 0-based column index of the block on its page.
 	Column int `json:"column"`
 	// Spans carries inline styling. It is optional: a block with no spans has

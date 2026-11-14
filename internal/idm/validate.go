@@ -121,6 +121,10 @@ func (d Document) Validate() error {
 			add(path+".confidence", "must be within [0,1], got %v", block.Confidence)
 		}
 
+		if block.FontSize < 0 || math.IsNaN(block.FontSize) || math.IsInf(block.FontSize, 0) {
+			add(path+".fontSize", "must be zero or a positive finite number, got %v", block.FontSize)
+		}
+
 		if !block.BBox.Valid() {
 			add(path+".bbox", "must have finite, ordered coordinates, got %v", block.BBox)
 		}
