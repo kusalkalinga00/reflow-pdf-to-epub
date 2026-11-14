@@ -8,8 +8,8 @@ import (
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
 )
 
-func textRect(text string, left, bottom, right, top float64) *responses.GetPageTextStructuredRect {
-	return &responses.GetPageTextStructuredRect{
+func char(text string, left, bottom, right, top float64) *responses.GetPageTextStructuredChar {
+	return &responses.GetPageTextStructuredChar{
 		Text: text,
 		PointPosition: responses.CharPosition{
 			Left:   left,
@@ -20,64 +20,49 @@ func textRect(text string, left, bottom, right, top float64) *responses.GetPageT
 	}
 }
 
-func TestBuildLinesSingleRun(t *testing.T) {
-	lines := buildLines([]*responses.GetPageTextStructuredRect{
-		textRect("Hello from a PDF.", 17, 763, 146, 773),
-	})
+// run lays out a string as characters with plausible widths, so tests exercise
+// the real grouping code rather than a single blob.
+func run(text string, left, bottom, size float64) []*responses.GetPageTextStructuredChar {
+	var out []*responses.GetPageTextStructuredChar
 
-	if len(lines) != 1 {
-		t.Fatalf("got %d lines, want 1", len(lines))
+	x := left
+	for _, r := range text {
+		width := size * 0.5
+		if r == ' ' {
+			width = size * 0.25
+		}
+		out = append(out, char(string(r), x, bottom, x+width, bottom+size))
+		x += width
 	}
-	if lines[0].text != "Hello from a PDF." {
-		t.Errorf("text = %q", lines[0].text)
-	}
-	if got, want := lines[0].box, (idm.Rect{X0: 17, Y0: 763, X1: 146, Y1: 773}); got != want {
-		t.Errorf("box = %+v, want %+v", got, want)
-	}
+	return out
 }
 
-func TestBuildLinesJoinsAdjacentRuns(t *testing.T) {
-	// A bold word splits one visual line into three runs. The middle run starts
-	// exactly where the first ends, so no space is invented.
-	lines := buildLines([]*responses.GetPageTextStructuredRect{
-		textRect("The road bent ", 72, 600, 170, 610),
-		textRect("north", 170, 600, 210, 610),
-		textRect(" and stopped.", 210, 600, 300, 610),
-	})
+func TestBuildLinesSingleLine(t *testing.T) {
+	lines := buildLines(run("Hello from a PDF.", 17, 763, 10))
 
 	if len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1: %+v", len(lines), lines)
 	}
-	if want := "The road bent north and stopped."; lines[0].text != want {
+	if want := "Hello from a PDF."; lines[0].text != want {
 		t.Errorf("text = %q, want %q", lines[0].text, want)
 	}
 	if lines[0].fontSize != 10 {
 		t.Errorf("fontSize = %v, want 10", lines[0].fontSize)
 	}
-}
-
-func TestBuildLinesInsertsSpaceAcrossAGap(t *testing.T) {
-	lines := buildLines([]*responses.GetPageTextStructuredRect{
-		textRect("word", 72, 600, 100, 610),
-		textRect("next", 104, 600, 130, 610),
-	})
-
-	if len(lines) != 1 {
-		t.Fatalf("got %d lines, want 1", len(lines))
-	}
-	if want := "word next"; lines[0].text != want {
-		t.Errorf("text = %q, want %q", lines[0].text, want)
+	if lines[0].box.Y0 != 763 || lines[0].box.Y1 != 773 {
+		t.Errorf("box = %+v, want the run's band", lines[0].box)
 	}
 }
 
 func TestBuildLinesSplitsOnBaselineChange(t *testing.T) {
-	lines := buildLines([]*responses.GetPageTextStructuredRect{
-		textRect("first line", 72, 600, 200, 610),
-		textRect("second line", 72, 580, 200, 590),
-	})
+	var chars []*responses.GetPageTextStructuredChar
+	chars = append(chars, run("first line", 72, 700, 10)...)
+	chars = append(chars, run("second line", 72, 680, 10)...)
+
+	lines := buildLines(chars)
 
 	if len(lines) != 2 {
-		t.Fatalf("got %d lines, want 2", len(lines))
+		t.Fatalf("got %d lines, want 2: %+v", len(lines), lines)
 	}
 	if lines[0].text != "first line" || lines[1].text != "second line" {
 		t.Errorf("lines = %q, %q", lines[0].text, lines[1].text)
@@ -85,70 +70,101 @@ func TestBuildLinesSplitsOnBaselineChange(t *testing.T) {
 }
 
 func TestBuildLinesSplitsOnColumnGutter(t *testing.T) {
-	lines := buildLines([]*responses.GetPageTextStructuredRect{
-		textRect("left column", 72, 600, 250, 610),
-		textRect("right column", 320, 600, 500, 610),
-	})
+	var chars []*responses.GetPageTextStructuredChar
+	chars = append(chars, run("left column", 72, 700, 10)...)
+	chars = append(chars, run("right column", 320, 700, 10)...)
+
+	lines := buildLines(chars)
 
 	if len(lines) != 2 {
-		t.Fatalf("got %d lines, want 2 (the gutter is not a word space)", len(lines))
+		t.Fatalf("got %d lines, want 2 (the gutter is not a word space): %+v", len(lines), lines)
 	}
 }
 
-func TestBuildLinesDropsWhitespaceRuns(t *testing.T) {
-	lines := buildLines([]*responses.GetPageTextStructuredRect{
-		textRect(" ", 16, 751, 23, 751),
-		textRect("Hello", 17, 763, 146, 773),
-	})
+func TestBuildLinesKeepsSingleSpaces(t *testing.T) {
+	lines := buildLines(run("two words here", 72, 700, 10))
 
 	if len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}
-	if lines[0].text != "Hello" {
-		t.Errorf("text = %q, want Hello", lines[0].text)
-	}
-}
-
-func TestBuildLinesNormalisesWhitespace(t *testing.T) {
-	lines := buildLines([]*responses.GetPageTextStructuredRect{
-		textRect("spaced   out", 72, 600, 200, 610),
-	})
-
-	if len(lines) != 1 {
-		t.Fatalf("got %d lines, want 1", len(lines))
-	}
-	if want := "spaced out"; lines[0].text != want {
+	if want := "two words here"; lines[0].text != want {
 		t.Errorf("text = %q, want %q", lines[0].text, want)
 	}
 }
 
-func TestBuildLinesSkipsEmptyRects(t *testing.T) {
-	if lines := buildLines(nil); len(lines) != 0 {
-		t.Fatalf("got %d lines, want 0", len(lines))
-	}
+func TestBuildLinesInsertsMissingSpaces(t *testing.T) {
+	// A PDF that positions words without space glyphs.
+	var chars []*responses.GetPageTextStructuredChar
+	chars = append(chars, char("a", 72, 700, 77, 710))
+	chars = append(chars, char("b", 77, 700, 82, 710))
+	chars = append(chars, char("c", 88, 700, 93, 710))
+	chars = append(chars, char("d", 93, 700, 98, 710))
 
-	lines := buildLines([]*responses.GetPageTextStructuredRect{
-		nil,
-		textRect("Degenerate", 10, 10, 10, 10),
-	})
-	if len(lines) != 0 {
-		t.Errorf("got %d lines, want 0 for zero-area runs", len(lines))
-	}
-}
-
-func TestBuildLinesUsesUnionBox(t *testing.T) {
-	lines := buildLines([]*responses.GetPageTextStructuredRect{
-		textRect("wide", 50, 600, 300, 610),
-		textRect("tall", 300, 595, 330, 615),
-	})
+	lines := buildLines(chars)
 
 	if len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}
-	if got, want := lines[0].box, (idm.Rect{X0: 50, Y0: 595, X1: 330, Y1: 615}); got != want {
+	if want := "ab cd"; lines[0].text != want {
+		t.Errorf("text = %q, want %q", lines[0].text, want)
+	}
+}
+
+func TestBuildLinesSplitsOnNewlineMarker(t *testing.T) {
+	// PDFium marks line breaks with newline characters; they are the primary
+	// signal and must not be treated as text.
+	chars := []*responses.GetPageTextStructuredChar{
+		char("a", 72, 700, 77, 710),
+		char("\r", 77, 700, 77, 700),
+		char("\n", 77, 700, 77, 700),
+		char("b", 72, 688, 77, 698),
+		char("\n", 77, 688, 77, 688),
+	}
+
+	lines := buildLines(chars)
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want 2: %+v", len(lines), lines)
+	}
+	if lines[0].text != "a" || lines[1].text != "b" {
+		t.Errorf("lines = %q, %q", lines[0].text, lines[1].text)
+	}
+}
+
+func TestBuildLinesIgnoresTrailingNewline(t *testing.T) {
+	chars := []*responses.GetPageTextStructuredChar{
+		char("a", 72, 700, 77, 710),
+		char("\n", 77, 700, 77, 700),
+	}
+
+	lines := buildLines(chars)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+}
+
+func TestBuildLinesEmptyInput(t *testing.T) {
+	if lines := buildLines(nil); len(lines) != 0 {
+		t.Fatalf("got %d lines, want 0", len(lines))
+	}
+	if lines := buildLines([]*responses.GetPageTextStructuredChar{nil}); len(lines) != 0 {
+		t.Fatalf("got %d lines for a nil char, want 0", len(lines))
+	}
+}
+
+func TestBuildLinesUnionBox(t *testing.T) {
+	var chars []*responses.GetPageTextStructuredChar
+	chars = append(chars, char("a", 50, 700, 60, 710))
+	chars = append(chars, char("b", 60, 700, 70, 712)) // slightly taller
+
+	lines := buildLines(chars)
+
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	if got, want := lines[0].box, (idm.Rect{X0: 50, Y0: 700, X1: 70, Y1: 712}); got != want {
 		t.Errorf("box = %+v, want %+v", got, want)
 	}
-	if lines[0].fontSize != 20 {
-		t.Errorf("fontSize = %v, want the tallest run (20)", lines[0].fontSize)
+	if lines[0].fontSize != 12 {
+		t.Errorf("fontSize = %v, want the tallest character (12)", lines[0].fontSize)
 	}
 }

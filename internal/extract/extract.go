@@ -135,13 +135,13 @@ func (e *PDFium) extractPage(doc references.FPDF_DOCUMENT, index int) (idm.Page,
 
 	text, err := e.instance.GetPageTextStructured(&requests.GetPageTextStructured{
 		Page: page,
-		Mode: requests.GetPageTextStructuredModeRects,
+		Mode: requests.GetPageTextStructuredModeChars,
 	})
 	if err != nil {
 		return idm.Page{}, nil, fmt.Errorf("page text: %w", err)
 	}
 
-	lines := buildLines(text.Rects)
+	lines := buildLines(text.Chars)
 
 	out := idm.Page{
 		Number:       index + 1,
