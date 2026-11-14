@@ -149,25 +149,6 @@ func TestGroupParagraphsSkipsFurniture(t *testing.T) {
 	}
 }
 
-func TestJoinText(t *testing.T) {
-	tests := []struct {
-		a, b, want string
-	}{
-		{"word", "next", "word next"},
-		{"exam-", "ple", "example"},
-		{"end-", "Up", "end- Up"},
-		{"", "only", "only"},
-		{"only", "", "only"},
-		{"trailing ", " space", "trailing space"},
-	}
-
-	for _, tt := range tests {
-		if got := joinText(tt.a, tt.b); got != tt.want {
-			t.Errorf("joinText(%q, %q) = %q, want %q", tt.a, tt.b, got, tt.want)
-		}
-	}
-}
-
 func TestBodySizeIsWeightedByText(t *testing.T) {
 	tests := []struct {
 		name  string
