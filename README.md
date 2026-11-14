@@ -35,6 +35,7 @@ Requires Go 1.27+.
 ```sh
 make build      # compile to bin/reflow
 make run -- version
+make run -- inspect book.pdf
 make check      # gofmt, go.mod tidy, vet, tests with -race
 ```
 
@@ -44,8 +45,10 @@ library call so it can be tested without a running service.
 ```
 cmd/reflow/          CLI entry point
 internal/version/    build metadata
+internal/ingest/     PDF preflight: size and page limits, validity, encryption
 internal/idm/        intermediate document model (extraction → assembly)
 internal/epub/       EPUB 3 writer: container, package, nav, NCX, archive
+internal/testpdf/    deterministic PDF fixtures for tests
 ```
 
 The EPUB writer enforces the parts readers and validators actually check: `mimetype`
