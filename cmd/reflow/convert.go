@@ -14,6 +14,7 @@ import (
 
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/epub"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ingest"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/layout"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/render"
 )
 
@@ -71,6 +72,8 @@ Convert a PDF into a reflowable EPUB 3 ebook.
 		doc.Meta.Title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
 	progress("recovered %d blocks", len(doc.Blocks))
+
+	doc = layout.Apply(doc)
 
 	book, err := render.Render(doc, render.Options{})
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/extract"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ingest"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/layout"
 )
 
 // extractDoc is the debugging command behind `reflow extract`. It dumps the
@@ -21,7 +22,7 @@ func extractDoc(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("extract", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprint(stderr, `usage: reflow extract [-json] [-o file] <file.pdf>
+		fmt.Fprint(stderr, `usage: reflow extract [-json] [-o file] [-layout] <file.pdf>
 
 Recover text from a PDF and print the intermediate document model.
 Without -json, a summary is printed instead.
@@ -30,6 +31,7 @@ Without -json, a summary is printed instead.
 
 	asJSON := fs.Bool("json", false, "write the document model as JSON")
 	outPath := fs.String("o", "", "write the JSON output to this file")
+	applyLayout := fs.Bool("layout", false, "put blocks in reading order before dumping")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -53,6 +55,10 @@ Without -json, a summary is printed instead.
 	if err != nil {
 		fmt.Fprintln(stderr, "reflow:", err)
 		return exitFailure
+	}
+
+	if *applyLayout {
+		doc = layout.Apply(doc)
 	}
 
 	writeJSON := *asJSON || *outPath != ""
