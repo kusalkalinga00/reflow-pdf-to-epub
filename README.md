@@ -27,3 +27,21 @@ River) · S3/R2 (files) · PDFium (extraction) · Tesseract (OCR) · epubcheck +
 ## Non-goals
 
 No DRM circumvention, no layout preservation, no math OCR, no hosting of books.
+
+## Development
+
+Requires Go 1.27+.
+
+```sh
+make build      # compile to bin/reflow
+make run -- version
+make check      # gofmt, go.mod tidy, vet, tests with -race
+```
+
+The CLI is a thin shell around `internal/` packages; every pipeline stage is a
+library call so it can be tested without a running service.
+
+```
+cmd/reflow/          CLI entry point
+internal/version/    build metadata
+```
