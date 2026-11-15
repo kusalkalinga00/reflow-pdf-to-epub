@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/normalize"
 )
 
 // Paragraph is a run of consecutive line blocks that belong together.
@@ -85,7 +86,7 @@ func shouldMerge(prev Paragraph, next idm.Block) bool {
 }
 
 func merge(prev Paragraph, next idm.Block) Paragraph {
-	prev.Text = joinText(prev.Text, next.Text)
+	prev.Text = normalize.JoinLines(prev.Text, next.Text)
 	prev.Box = idm.Rect{
 		X0: math.Min(prev.Box.X0, next.BBox.X0),
 		Y0: math.Min(prev.Box.Y0, next.BBox.Y0),
@@ -97,28 +98,6 @@ func merge(prev Paragraph, next idm.Block) Paragraph {
 	}
 	return prev
 }
-
-// joinText joins two lines, undoing a hyphenated line break. "exam-" followed
-// by "ple" becomes "example"; everything else joins with a space. The
-// normalisation stage owns the full rule set; this handles the common case
-// without needing a dictionary.
-func joinText(a, b string) string {
-	a = strings.TrimRight(a, " ")
-	b = strings.TrimLeft(b, " ")
-	if a == "" {
-		return b
-	}
-	if b == "" {
-		return a
-	}
-
-	if strings.HasSuffix(a, "-") && isLower(b[0]) {
-		return a[:len(a)-1] + b
-	}
-	return a + " " + b
-}
-
-func isLower(c byte) bool { return c >= 'a' && c <= 'z' }
 
 func classifyHeadings(paras []Paragraph) {
 	if len(paras) == 0 {

@@ -57,6 +57,7 @@ cmd/reflow/          CLI entry point
 internal/version/    build metadata
 internal/ingest/     PDF preflight: size and page limits, validity, encryption
 internal/extract/    PDFium text, line geometry, and coverage
+internal/normalize/  ligatures, Unicode, whitespace, and de-hyphenation
 internal/layout/     reading order for columns, running header and footer removal
 internal/render/     paragraphs, headings, chapters, page anchors
 internal/idm/        intermediate document model (extraction → assembly)
