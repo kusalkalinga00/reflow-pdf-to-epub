@@ -75,11 +75,40 @@ func Text(s string) string {
 	s = strings.ToValidUTF8(s, "")
 	s = ligatures.Replace(s)
 	s = invisible.Replace(s)
+	s = stripControl(s)
 	s = norm.NFC.String(s)
 	s = collapseSpaces(s)
 	s = collapseSpacedCaps(s)
 
 	return s
+}
+
+// stripControl removes control characters.
+//
+// PDFs whose fonts declare no usable encoding occasionally map punctuation to
+// a control code: a hyphen becomes U+0002 in extraction. No book contains C0
+// or C1 control characters, so removing them is always safe.
+func stripControl(s string) string {
+	if !strings.ContainsFunc(s, isControl) {
+		return s
+	}
+
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if !isControl(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func isControl(r rune) bool {
+	switch r {
+	case '\t', '\n', '\r':
+		return false
+	}
+	return r < 0x20 || (r >= 0x7f && r <= 0x9f)
 }
 
 // spanText normalizes a styled run, keeping one space at either edge so the

@@ -37,6 +37,21 @@ func TestTextRemovesInvisibleCharacters(t *testing.T) {
 	}
 }
 
+func TestTextRemovesControlCharacters(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"The effi\x02cient", "The efficient"},
+		{"bell\x07", "bell"},
+		{"del\x7f", "del"},
+		{"tab\tkept", "tab kept"},
+	}
+
+	for _, tt := range tests {
+		if got := Text(tt.in); got != tt.want {
+			t.Errorf("Text(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
 func TestTextNormalizesSpaces(t *testing.T) {
 	tests := []struct{ in, want string }{
 		{"a\u00a0b", "a b"},
