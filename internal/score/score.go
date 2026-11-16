@@ -55,6 +55,7 @@ type Signals struct {
 	Furniture       int     `json:"furnitureRemoved"`
 	LowConfidence   int     `json:"lowConfidenceBlocks"`
 	OCRedPages      int     `json:"ocrPages"`
+	OutlineEntries  int     `json:"outlineEntries"`
 	MeanCoverage    float64 `json:"meanCoverage"`
 }
 
@@ -107,6 +108,14 @@ func Evaluate(doc idm.Document, paras []render.Paragraph, chapters []string) Rep
 		deduct(10, "LOW_CONFIDENCE",
 			"%d%% of blocks were classified with low confidence.",
 			100*s.LowConfidence/s.Blocks)
+	}
+
+	if s.OutlineEntries > 0 {
+		r.Issues = append(r.Issues, Issue{
+			Severity: SeverityInfo,
+			Code:     "OUTLINE_USED",
+			Message:  fmt.Sprintf("Chapters follow the PDF's own outline (%d entries).", s.OutlineEntries),
+		})
 	}
 
 	if s.OCRedPages > 0 {
@@ -179,6 +188,8 @@ func gather(doc idm.Document, paras []render.Paragraph, chapters []string) Signa
 		s.MeanCoverage = coverage / float64(len(doc.Pages))
 	}
 
+	s.OutlineEntries = len(doc.Outline)
+
 	for _, title := range chapters {
 		if isGenericTitle(title) {
 			s.GenericChapters++
@@ -190,14 +201,15 @@ func gather(doc idm.Document, paras []render.Paragraph, chapters []string) Signa
 
 func isGenericTitle(title string) bool {
 	switch strings.ToLower(strings.TrimSpace(title)) {
-	case "", "front matter", "content", "untitled", "body":
+	case "", "content", "untitled", "body":
 		return true
 	}
 	return false
 }
 
 func tierFor(score int, s Signals) Tier {
-	if score >= 85 && s.Headings > 0 && s.GenericChapters == 0 {
+	hasStructure := s.Headings > 0 || s.OutlineEntries > 0
+	if score >= 85 && hasStructure && s.GenericChapters == 0 {
 		return TierStructured
 	}
 	if score >= 50 {
