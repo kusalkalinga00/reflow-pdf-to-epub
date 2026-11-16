@@ -3,11 +3,13 @@ package web_test
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -126,6 +128,54 @@ func TestConvertReturnsAnEPUB(t *testing.T) {
 	}
 	if zr.File[0].Name != "mimetype" {
 		t.Errorf("first entry = %q, want mimetype", zr.File[0].Name)
+	}
+}
+
+func TestConvertReportsQuality(t *testing.T) {
+	srv := newServer(t, web.Options{})
+
+	body, contentType := uploadBody(t, "book.pdf", testpdf.Build(2))
+	resp, err := http.Post(srv.URL+"/api/convert", contentType, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+
+	tier := resp.Header.Get("X-Reflow-Tier")
+	if tier != "T1" && tier != "T2" {
+		t.Errorf("tier = %q, want T1 or T2", tier)
+	}
+
+	scoreHeader := resp.Header.Get("X-Reflow-Score")
+	value, err := strconv.Atoi(scoreHeader)
+	if err != nil {
+		t.Fatalf("score header %q is not a number", scoreHeader)
+	}
+	if value < 0 || value > 100 {
+		t.Errorf("score = %d, want within [0,100]", value)
+	}
+
+	encoded := resp.Header.Get("X-Reflow-Report")
+	if encoded == "" {
+		t.Fatal("no report header")
+	}
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		t.Fatalf("report header is not base64: %v", err)
+	}
+	var report struct {
+		Score int
+		Tier  string
+	}
+	if err := json.Unmarshal(raw, &report); err != nil {
+		t.Fatalf("report is not JSON: %v", err)
+	}
+	if report.Score != value || report.Tier != tier {
+		t.Errorf("report = %+v, want score %d tier %q", report, value, tier)
 	}
 }
 
