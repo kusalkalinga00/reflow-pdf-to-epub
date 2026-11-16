@@ -8,6 +8,7 @@ import (
 	"image/color"
 	"image/draw"
 	"image/jpeg"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -179,6 +180,43 @@ func TestExtractRecoversJpegFigures(t *testing.T) {
 	}
 	if err := doc.Validate(); err != nil {
 		t.Errorf("document with a figure is invalid: %v", err)
+	}
+}
+
+func TestExtractDecodesFlateImages(t *testing.T) {
+	const size = 120
+	rgb := make([]byte, size*size*3)
+	for i := range rgb {
+		rgb[i] = byte(i % 251)
+	}
+
+	pdf := testpdf.Build(1, testpdf.WithFlateImage(rgb, size, size, 200, 200))
+
+	doc, err := extractBytes(t, newExtractor(t, extract.Options{}), pdf)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+
+	var figure *idm.Block
+	for i := range doc.Blocks {
+		if doc.Blocks[i].Image != nil {
+			figure = &doc.Blocks[i]
+		}
+	}
+	if figure == nil {
+		t.Fatal("no figure was recovered")
+	}
+
+	if figure.Image.MediaType != "image/png" {
+		t.Errorf("media type = %q, want image/png", figure.Image.MediaType)
+	}
+
+	img, err := png.Decode(bytes.NewReader(figure.Image.Data))
+	if err != nil {
+		t.Fatalf("recovered image is not a PNG: %v", err)
+	}
+	if b := img.Bounds(); b.Dx() != size || b.Dy() != size {
+		t.Errorf("decoded size = %dx%d, want %dx%d", b.Dx(), b.Dy(), size, size)
 	}
 }
 
