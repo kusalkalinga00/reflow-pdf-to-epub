@@ -26,6 +26,11 @@ jobs:
           echo "PKG_CONFIG_PATH=$PWD/.pdfium/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$PWD/.pdfium/lib" >> "$GITHUB_ENV"
 
+      - name: Install Tesseract
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+
       - name: Check formatting
         run: |
           unformatted="$(gofmt -l .)"

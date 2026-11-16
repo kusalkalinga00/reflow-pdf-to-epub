@@ -11,9 +11,10 @@ import (
 
 // line is one visual line of text after assembling its characters.
 type line struct {
-	text     string
-	box      idm.Rect
-	fontSize float64
+	text       string
+	box        idm.Rect
+	fontSize   float64
+	confidence float64
 }
 
 // piece is one character with its box.
@@ -193,7 +194,7 @@ func joinPieces(pieces []piece) line {
 		return line{}
 	}
 
-	return line{text: text, box: box, fontSize: capHeight(pieces, box)}
+	return line{text: text, box: box, fontSize: capHeight(pieces, box), confidence: 1}
 }
 
 // capHeight estimates the text size from the line's ascender-to-baseline

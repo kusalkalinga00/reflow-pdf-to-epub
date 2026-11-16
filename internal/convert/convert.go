@@ -21,6 +21,7 @@ import (
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ingest"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/layout"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/normalize"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ocr"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/render"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/score"
 )
@@ -34,6 +35,8 @@ type Options struct {
 	Limits ingest.Limits
 	// Now fixes the EPUB modification timestamp for reproducible output.
 	Now time.Time
+	// OCR reads pages that have no text layer. Nil disables it.
+	OCR ocr.Recognizer
 }
 
 // DocOptions describe one document within a Converter.
@@ -75,7 +78,10 @@ func New(opts Options) (*Converter, error) {
 		opts.Limits = ingest.DefaultLimits
 	}
 
-	extractor, err := extract.NewPDFium(extract.Options{Password: opts.Password})
+	extractor, err := extract.NewPDFium(extract.Options{
+		Password: opts.Password,
+		OCR:      opts.OCR,
+	})
 	if err != nil {
 		return nil, err
 	}

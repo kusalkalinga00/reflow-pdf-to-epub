@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ocr"
 )
 
 // Thresholds a case must meet to pass. They are deliberately strict: the
@@ -34,6 +35,9 @@ type Case struct {
 	// WantError is the error the pipeline must return, for cases that are
 	// expected to fail (a scan with no text layer, for example).
 	WantError error
+	// NoExpectation marks a diagnostic case with no ground truth: the
+	// conversion still runs, but only "did it produce a book" is checked.
+	NoExpectation bool
 }
 
 // Result is the outcome of running one case.
@@ -51,6 +55,9 @@ type Result struct {
 	// ExpectedError marks a case that is supposed to fail, such as a scan with
 	// no text layer. Metrics are not meaningful for those.
 	ExpectedError bool `json:"expectedError,omitempty"`
+	// NoExpectation is set for diagnostic cases without expected text.
+	NoExpectation bool `json:"noExpectation,omitempty"`
+	Pages         int  `json:"pages,omitempty"`
 
 	Pass    bool   `json:"pass"`
 	Failure string `json:"failure,omitempty"`
@@ -62,7 +69,12 @@ type Result struct {
 // Run converts every case and scores it. One PDFium pool is shared for the
 // whole run.
 func Run(cases []Case) []Result {
-	converter, err := convert.New(convert.Options{})
+	var recognizer ocr.Recognizer
+	if t, err := ocr.NewTesseract(); err == nil {
+		recognizer = t
+	}
+
+	converter, err := convert.New(convert.Options{OCR: recognizer})
 	if err != nil {
 		results := make([]Result, len(cases))
 		for i, c := range cases {
@@ -88,6 +100,7 @@ func runCase(converter *convert.Converter, c Case) (res Result) {
 	text, chapters := out.Text, out.Chapters
 	res.Text = text
 	res.ChapterTitles = chapters
+	res.Pages = out.Pages
 
 	if c.WantError != nil {
 		res.ExpectedError = true
@@ -105,6 +118,15 @@ func runCase(converter *convert.Converter, c Case) (res Result) {
 	if err != nil {
 		res.Err = err.Error()
 		res.Failure = err.Error()
+		return res
+	}
+
+	if c.NoExpectation {
+		res.NoExpectation = true
+		res.Pass = len(text) > 0
+		if !res.Pass {
+			res.Failure = "no text was recovered"
+		}
 		return res
 	}
 

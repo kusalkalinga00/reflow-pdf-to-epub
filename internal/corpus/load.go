@@ -12,8 +12,9 @@ import (
 //
 // Every name.pdf must sit next to a name.txt holding the text a reader should
 // see. Real PDFs cannot be committed to the repository, so this is how the
-// engine is measured against actual books.
-func LoadDir(dir string) ([]Case, error) {
+// engine is measured against actual books. With allowMissing, a PDF without a
+// .txt becomes a diagnostic case instead of an error.
+func LoadDir(dir string, allowMissing bool) ([]Case, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -34,7 +35,11 @@ func LoadDir(dir string) ([]Case, error) {
 		wantPath := filepath.Join(dir, base+".txt")
 		want, err := os.ReadFile(wantPath)
 		if err != nil {
-			return nil, fmt.Errorf("%s needs an expected-text file at %s: %w", entry.Name(), wantPath, err)
+			if !allowMissing {
+				return nil, fmt.Errorf("%s needs an expected-text file at %s: %w", entry.Name(), wantPath, err)
+			}
+			cases = append(cases, Case{Name: base, PDF: pdf, NoExpectation: true})
+			continue
 		}
 
 		cases = append(cases, Case{

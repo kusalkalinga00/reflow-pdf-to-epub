@@ -193,6 +193,23 @@ func TestFurnitureIsReportedAsInfo(t *testing.T) {
 	}
 }
 
+func TestOCRedPagesAreReported(t *testing.T) {
+	doc := document(2, 0.3, block(idm.KindParagraph, 1))
+	doc.Pages[1].Provenance = idm.ProvenanceOCR
+
+	report := score.Evaluate(doc, paragraphs(), []string{"Chapter One"})
+
+	if report.Signals.OCRedPages != 1 {
+		t.Fatalf("ocr pages = %d, want 1", report.Signals.OCRedPages)
+	}
+	if report.Score != 100 {
+		t.Errorf("score = %d, want 100: OCR is better than a blank page", report.Score)
+	}
+	if !hasIssue(report, "OCR_USED") {
+		t.Errorf("issues = %v, want OCR_USED", report.Issues)
+	}
+}
+
 func TestSummaryMatchesTier(t *testing.T) {
 	structured := score.Evaluate(document(1, 0.3, block(idm.KindParagraph, 1)), paragraphs(), []string{"Chapter One"})
 	if !strings.Contains(structured.Summary, "Structured") {

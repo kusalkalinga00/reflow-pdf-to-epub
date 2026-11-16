@@ -6,6 +6,7 @@ require (
 	github.com/beevik/etree v1.8.1
 	github.com/klippa-app/go-pdfium v1.21.4
 	github.com/pdfcpu/pdfcpu v0.16.4
+	golang.org/x/image v0.47.0
 	golang.org/x/text v0.44.0
 )
 
@@ -25,7 +26,6 @@ require (
 	github.com/xdg-go/stringprep v1.0.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
-	golang.org/x/image v0.47.0 // indirect
 	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect

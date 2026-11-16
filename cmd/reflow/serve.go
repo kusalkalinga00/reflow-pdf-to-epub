@@ -15,6 +15,7 @@ import (
 
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ingest"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ocr"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/web"
 )
 
@@ -32,6 +33,7 @@ meant to be exposed to a network.
 	addr := fs.String("addr", "127.0.0.1:8080", "address to listen on")
 	maxMB := fs.Int("max-mb", int(ingest.DefaultLimits.MaxBytes>>20), "largest accepted upload in MB")
 	concurrency := fs.Int("jobs", 2, "conversions allowed at once")
+	useOCR := fs.Bool("ocr", true, "read pages with no text layer using tesseract")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -41,7 +43,17 @@ meant to be exposed to a network.
 		return exitUsage
 	}
 
-	converter, err := convert.New(convert.Options{})
+	var recognizer ocr.Recognizer
+	if *useOCR {
+		rec, recErr := ocr.NewTesseract()
+		if recErr != nil {
+			fmt.Fprintln(stderr, "reflow: OCR disabled:", recErr)
+		} else {
+			recognizer = rec
+		}
+	}
+
+	converter, err := convert.New(convert.Options{OCR: recognizer})
 	if err != nil {
 		fmt.Fprintln(stderr, "reflow:", err)
 		return exitFailure
