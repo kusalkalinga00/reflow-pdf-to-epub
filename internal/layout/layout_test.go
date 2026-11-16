@@ -217,6 +217,19 @@ func TestApplyKeepsPagesOrderedAndValid(t *testing.T) {
 	}
 }
 
+func TestApplyKeepsTheOutline(t *testing.T) {
+	doc := document(2,
+		block("p1", 1, 72, 600, 520, 612),
+		block("p2", 2, 72, 600, 520, 612),
+	)
+	doc.Outline = []idm.OutlineEntry{{Title: "Chapter One", Page: 1, Level: 1}}
+
+	out := Apply(doc)
+	if len(out.Outline) != 1 || out.Outline[0].Title != "Chapter One" {
+		t.Fatalf("outline = %+v, want it preserved", out.Outline)
+	}
+}
+
 func TestApplyDoesNotMutateInput(t *testing.T) {
 	doc := document(1,
 		block("second", 1, 72, 600, 520, 612),

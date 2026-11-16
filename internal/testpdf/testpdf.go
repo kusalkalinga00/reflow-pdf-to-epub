@@ -14,6 +14,13 @@ type config struct {
 	mediaBox func(page int) string
 	pages    [][]Line
 	hasPages bool
+	outline  []Bookmark
+}
+
+// Bookmark is one entry in the PDF outline, pointing at a 1-based page.
+type Bookmark struct {
+	Title string
+	Page  int
 }
 
 // Line is one line of text drawn on the first page.
@@ -39,6 +46,11 @@ func WithLines(lines ...Line) Option {
 		c.pages = [][]Line{lines}
 		c.hasPages = true
 	}
+}
+
+// WithOutline writes a PDF outline (bookmarks) pointing at pages.
+func WithOutline(marks ...Bookmark) Option {
+	return func(c *config) { c.outline = marks }
 }
 
 // WithPages sets the content of every page. Pages beyond the supplied slices
@@ -94,7 +106,7 @@ func Build(pages int, opts ...Option) []byte {
 		objects[contentNum] = fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream)
 	}
 
-	objects[catalog] = fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pagesObj)
+	catalogBody := fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pagesObj)
 	objects[pagesObj] = fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>", strings.Join(kids, " "), pages)
 	// WinAnsiEncoding is declared explicitly: without it, text extraction has to
 	// guess at the character mapping and gets some punctuation wrong.
@@ -102,6 +114,35 @@ func Build(pages int, opts ...Option) []byte {
 	objects[info] = "<< /Title (Test Document) /Author (Test Author) /Producer (testpdf) >>"
 
 	maxObj := firstPage + 2*pages
+
+	if len(cfg.outline) > 0 {
+		outlinesNum := maxObj + 1
+		kids := make([]int, 0, len(cfg.outline))
+
+		for i, mark := range cfg.outline {
+			num := outlinesNum + 1 + i
+			pageRef := firstPage + 2*(mark.Page-1)
+			body := fmt.Sprintf("<< /Title (%s) /Parent %d 0 R /Dest [%d 0 R /Fit]",
+				escapeText(mark.Title), outlinesNum, pageRef)
+			if i > 0 {
+				body += fmt.Sprintf(" /Prev %d 0 R", num-1)
+			}
+			if i < len(cfg.outline)-1 {
+				body += fmt.Sprintf(" /Next %d 0 R", num+1)
+			}
+			body += " >>"
+			objects[num] = body
+			kids = append(kids, num)
+		}
+
+		objects[outlinesNum] = fmt.Sprintf("<< /Type /Outlines /First %d 0 R /Last %d 0 R /Count %d >>",
+			kids[0], kids[len(kids)-1], len(kids))
+		catalogBody = fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R /Outlines %d 0 R >>", pagesObj, outlinesNum)
+		maxObj = outlinesNum + len(cfg.outline)
+	}
+
+	objects[catalog] = catalogBody
+
 	var buf bytes.Buffer
 	buf.WriteString("%PDF-1.7\n")
 

@@ -9,6 +9,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -38,7 +39,7 @@ func Render(doc idm.Document, opts Options) (epub.Book, error) {
 	}
 
 	title := titleOf(doc, opts)
-	chapters := buildChapters(paras, title)
+	chapters := buildChapters(paras, title, doc.Outline)
 
 	book := epub.Book{
 		Metadata: epub.Metadata{
@@ -73,8 +74,9 @@ func Render(doc idm.Document, opts Options) (epub.Book, error) {
 }
 
 type chapter struct {
-	title string
-	paras []Paragraph
+	title     string
+	startPage int
+	paras     []Paragraph
 }
 
 // buildChapters splits at the highest heading level present, falling back to a
@@ -83,7 +85,13 @@ type chapter struct {
 // The fallback is one chapter rather than one per page on purpose: a table of
 // contents listing "Page 1 … Page 300" is worse than no chapters at all, and
 // the page list already provides page-level navigation.
-func buildChapters(paras []Paragraph, title string) []chapter {
+func buildChapters(paras []Paragraph, title string, outline []idm.OutlineEntry) []chapter {
+	// The document's own table of contents beats anything inferred from font
+	// sizes, so it is used whenever it describes more than a single section.
+	if fromOutline := chaptersFromOutline(paras, outline); len(fromOutline) > 0 {
+		return fromOutline
+	}
+
 	if !hasHeadings(paras) {
 		return []chapter{{title: title, paras: paras}}
 	}
@@ -107,6 +115,81 @@ func buildChapters(paras []Paragraph, title string) []chapter {
 	}
 
 	return chapters
+}
+
+// chaptersFromOutline splits the document at the top level of its bookmarks.
+// It returns nil when the outline does not describe a structure worth using,
+// so the size-based fallback can take over.
+func chaptersFromOutline(paras []Paragraph, outline []idm.OutlineEntry) []chapter {
+	starts := outlineStarts(outline)
+	if len(starts) < 2 {
+		return nil
+	}
+
+	chapters := make([]chapter, len(starts))
+	for i, s := range starts {
+		chapters[i] = chapter{title: s.Title, startPage: s.Page}
+	}
+
+	var frontMatter []Paragraph
+	for _, p := range paras {
+		index := -1
+		for i := len(chapters) - 1; i >= 0; i-- {
+			if p.Page >= chapters[i].startPage {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			frontMatter = append(frontMatter, p)
+			continue
+		}
+		chapters[index].paras = append(chapters[index].paras, p)
+	}
+
+	var out []chapter
+	if len(frontMatter) > 0 {
+		out = append(out, chapter{title: "Front matter", paras: frontMatter})
+	}
+	for _, c := range chapters {
+		// A bookmark can point at a page with nothing on it; an empty chapter
+		// in the table of contents is worse than a missing one.
+		if len(c.paras) > 0 {
+			out = append(out, c)
+		}
+	}
+
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// outlineStarts returns the top-level entries that point at a page, in page
+// order, dropping duplicates.
+func outlineStarts(outline []idm.OutlineEntry) []idm.OutlineEntry {
+	top := 0
+	for _, e := range outline {
+		if e.Page > 0 && (top == 0 || e.Level < top) {
+			top = e.Level
+		}
+	}
+	if top == 0 {
+		return nil
+	}
+
+	var starts []idm.OutlineEntry
+	seen := map[int]bool{}
+	for _, e := range outline {
+		if e.Level != top || e.Page <= 0 || seen[e.Page] {
+			continue
+		}
+		seen[e.Page] = true
+		starts = append(starts, e)
+	}
+
+	sort.SliceStable(starts, func(i, j int) bool { return starts[i].Page < starts[j].Page })
+	return starts
 }
 
 func hasHeadings(paras []Paragraph) bool {

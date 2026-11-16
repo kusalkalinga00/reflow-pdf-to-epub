@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/epub"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
 )
 
@@ -141,6 +142,72 @@ func TestRenderFrontMatterBeforeFirstHeading(t *testing.T) {
 	if book.Chapters[0].Title != "Front matter" {
 		t.Errorf("first chapter = %q, want Front matter", book.Chapters[0].Title)
 	}
+}
+
+func TestRenderUsesTheOutlineForChapters(t *testing.T) {
+	doc := document([]idm.Block{
+		line("Cover and copyright.", 1, 700, 710, 10),
+		line("First chapter body.", 2, 700, 710, 10),
+		line("More of the first chapter.", 3, 700, 710, 10),
+		line("Second chapter body.", 5, 700, 710, 10),
+	}, 5)
+	doc.Outline = []idm.OutlineEntry{
+		{Title: "Chapter One", Page: 2, Level: 1},
+		{Title: "Chapter Two", Page: 5, Level: 1},
+	}
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	titles := chapterTitlesOf(book)
+	want := []string{"Front matter", "Chapter One", "Chapter Two"}
+	if len(titles) != len(want) {
+		t.Fatalf("chapters = %v, want %v", titles, want)
+	}
+	for i := range want {
+		if titles[i] != want[i] {
+			t.Fatalf("chapters = %v, want %v", titles, want)
+		}
+	}
+
+	// Pages 2 and 3 belong to the first outline chapter, not the second.
+	if !strings.Contains(book.Chapters[1].Body, "More of the first chapter.") {
+		t.Errorf("first chapter is missing its second page:\n%s", book.Chapters[1].Body)
+	}
+	if strings.Contains(book.Chapters[1].Body, "Second chapter body.") {
+		t.Error("content leaked across outline chapters")
+	}
+}
+
+func TestRenderIgnoresAThinOutline(t *testing.T) {
+	doc := document([]idm.Block{
+		line("Body on page one.", 1, 600, 610, 10),
+		line("Body on page two.", 2, 600, 610, 10),
+	}, 2)
+	doc.Outline = []idm.OutlineEntry{{Title: "Only Entry", Page: 1, Level: 1}}
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	// One bookmark does not describe a structure; the fallback is used.
+	if len(book.Chapters) != 1 {
+		t.Fatalf("got %d chapters, want 1: %v", len(book.Chapters), chapterTitlesOf(book))
+	}
+	if book.Chapters[0].Title == "Only Entry" {
+		t.Error("a single bookmark was used to split the book")
+	}
+}
+
+func chapterTitlesOf(book epub.Book) []string {
+	titles := make([]string, len(book.Chapters))
+	for i, c := range book.Chapters {
+		titles[i] = c.Title
+	}
+	return titles
 }
 
 func TestRenderWithoutHeadingsIsOneChapter(t *testing.T) {

@@ -19,8 +19,9 @@ import (
 // marked. The input document is not modified.
 func Apply(doc idm.Document) idm.Document {
 	out := idm.Document{
-		Meta:  doc.Meta,
-		Pages: doc.Pages,
+		Meta:    doc.Meta,
+		Pages:   doc.Pages,
+		Outline: doc.Outline,
 	}
 
 	byPage := make([][]idm.Block, len(doc.Pages))
