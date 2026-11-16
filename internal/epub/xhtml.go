@@ -3,6 +3,7 @@ package epub
 import (
 	"encoding/xml"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/beevik/etree"
@@ -36,6 +37,9 @@ func (b *prepared) chapterDocument(ch chapter) ([]byte, error) {
 		"{{body}}", ch.body,
 	).Replace(chapterTemplate)
 
+	if err := checkAccessible(ch.body); err != nil {
+		return nil, fmt.Errorf("%w: chapter %q: %v", ErrInvalidBook, ch.title, err)
+	}
 	if err := checkWellFormed([]byte(doc)); err != nil {
 		return nil, fmt.Errorf("%w: chapter %q is not well-formed XHTML: %w", ErrInvalidBook, ch.title, err)
 	}
@@ -96,6 +100,27 @@ func newXMLDocument() *etree.Document {
 	doc := etree.NewDocument()
 	doc.CreateProcInst("xml", `version="1.0" encoding="utf-8"`)
 	return doc
+}
+
+// imgTag matches an opening image tag.
+var imgTag = regexp.MustCompile(`(?i)<img\b[^>]*>`)
+
+// checkAccessible rejects content that readers with assistive technology cannot
+// use.
+//
+// The check is deliberately narrow: alt text on images and a language on the
+// document are the two things this pipeline can get wrong and the two things
+// that make an otherwise valid book unusable. DAISY's Ace would check more, but
+// its current runners cannot start in this toolchain (Electron crashes on Node
+// 24, Puppeteer has no usable Chrome), so the contract is enforced here instead
+// of claimed in a document.
+func checkAccessible(body string) error {
+	for _, tag := range imgTag.FindAllString(body, -1) {
+		if !strings.Contains(strings.ToLower(tag), "alt=") {
+			return fmt.Errorf("image has no alt text: %s", tag)
+		}
+	}
+	return nil
 }
 
 // checkWellFormed parses data as XML and discards the result. It is the gate

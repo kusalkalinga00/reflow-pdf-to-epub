@@ -52,6 +52,13 @@ heading detection, running-header removal — and labelled with a fidelity tier.
 reasons, and the HTTP API carries them in `X-Reflow-Tier` and `X-Reflow-Score`
 with the full report in `X-Reflow-Report`.
 
+Every book is also checked by **EPUBCheck** before it is written; a book that
+fails is never handed over. Accessibility is enforced where it can be: a
+document language is required, navigation landmarks are always emitted, and an
+image without `alt` is rejected. DAISY's `ace` checker is not wired in — its
+Electron runner crashes on current Node and its Puppeteer runner needs a Chrome
+that is not present — so the contract is checked rather than claimed.
+
 ## Non-goals
 
 No DRM circumvention, no layout preservation, no math OCR, no hosting of books.
