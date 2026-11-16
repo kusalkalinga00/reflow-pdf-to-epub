@@ -102,11 +102,21 @@ figcaption {
 // Book is everything the writer needs. The zero value is invalid: a book needs
 // a title, a language, and at least one chapter.
 type Book struct {
-	Metadata   Metadata
-	Cover      *Cover
-	Chapters   []Chapter
-	PageList   []PageTarget
+	Metadata Metadata
+	Cover    *Cover
+	Chapters []Chapter
+	PageList []PageTarget
+	// Images are figures referenced from chapter bodies as "../images/<Name>".
+	Images     []Image
 	Stylesheet string
+}
+
+// Image is one figure file in the archive.
+type Image struct {
+	// Name is the file name inside images/, for example "fig-001.jpg".
+	Name      string
+	Data      []byte
+	MediaType string
 }
 
 // Metadata becomes the package document's metadata section.
@@ -179,6 +189,7 @@ func WriteBytes(book Book) ([]byte, error) {
 }
 
 type prepared struct {
+	images     []Image
 	meta       Metadata
 	identifier string
 	modified   time.Time
@@ -280,6 +291,24 @@ func prepare(book Book) (*prepared, error) {
 		}
 	}
 
+	seenImage := make(map[string]bool, len(book.Images))
+	for i, img := range book.Images {
+		if img.Name == "" || len(img.Data) == 0 {
+			return nil, fmt.Errorf("%w: images[%d] needs a name and data", ErrInvalidBook, i)
+		}
+		if strings.ContainsAny(img.Name, `/\\`) {
+			return nil, fmt.Errorf("%w: images[%d] name %q must be a file name", ErrInvalidBook, i, img.Name)
+		}
+		if _, ok := coverExtensions[img.MediaType]; !ok {
+			return nil, fmt.Errorf("%w: images[%d] has unsupported media type %q", ErrInvalidBook, i, img.MediaType)
+		}
+		if seenImage[img.Name] {
+			return nil, fmt.Errorf("%w: duplicate image name %q", ErrInvalidBook, img.Name)
+		}
+		seenImage[img.Name] = true
+	}
+	b.images = book.Images
+
 	b.identifier = strings.TrimSpace(book.Metadata.Identifier)
 	if b.identifier == "" {
 		b.identifier = deriveIdentifier(book)
@@ -348,6 +377,10 @@ func (b *prepared) files() ([]file, error) {
 	files = append(files, file{name: path.Join(rootDir, ncxName), data: ncx})
 
 	files = append(files, file{name: path.Join(rootDir, cssName), data: []byte(b.css)})
+
+	for _, img := range b.images {
+		files = append(files, file{name: path.Join(rootDir, "images", img.Name), data: img.Data})
+	}
 
 	if b.cover != nil {
 		files = append(files, file{name: path.Join(rootDir, b.cover.filename), data: b.cover.data})

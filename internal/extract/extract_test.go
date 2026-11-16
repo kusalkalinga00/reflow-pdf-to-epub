@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/jpeg"
 	"os"
 	"path/filepath"
 	"strings"
@@ -123,6 +127,58 @@ func TestExtractPageGeometry(t *testing.T) {
 		if b.BBox.X0 < 0 || b.BBox.Y0 < 0 || b.BBox.X1 > page.Width || b.BBox.Y1 > page.Height {
 			t.Errorf("block %q has box %+v outside the page", b.Text, b.BBox)
 		}
+	}
+}
+
+func makeJPEG(t *testing.T) []byte {
+	t.Helper()
+
+	img := image.NewRGBA(image.Rect(0, 0, 120, 120))
+	draw.Draw(img, img.Bounds(), &image.Uniform{C: color.RGBA{R: 200, G: 30, B: 30, A: 255}}, image.Point{}, draw.Src)
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, nil); err != nil {
+		t.Fatalf("encode jpeg: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func TestExtractRecoversJpegFigures(t *testing.T) {
+	pdf := testpdf.Build(1, testpdf.WithImage(makeJPEG(t), 120, 120, 200, 200))
+
+	doc, err := extractBytes(t, newExtractor(t, extract.Options{}), pdf)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+
+	var figures []idm.Block
+	for _, b := range doc.Blocks {
+		if b.Image != nil {
+			figures = append(figures, b)
+		}
+	}
+	if len(figures) != 1 {
+		t.Fatalf("got %d figures, want 1", len(figures))
+	}
+
+	fig := figures[0]
+	if fig.Kind != idm.KindFigure {
+		t.Errorf("kind = %q, want figure", fig.Kind)
+	}
+	if fig.Image.MediaType != "image/jpeg" {
+		t.Errorf("media type = %q", fig.Image.MediaType)
+	}
+	if len(fig.Image.Data) == 0 {
+		t.Error("no image data")
+	}
+	if fig.Image.PixelWidth != 120 || fig.Image.PixelHeight != 120 {
+		t.Errorf("pixel size = %dx%d, want 120x120", fig.Image.PixelWidth, fig.Image.PixelHeight)
+	}
+	if fig.BBox.Area() <= 0 {
+		t.Errorf("box = %+v, want a placement rectangle", fig.BBox)
+	}
+	if err := doc.Validate(); err != nil {
+		t.Errorf("document with a figure is invalid: %v", err)
 	}
 }
 

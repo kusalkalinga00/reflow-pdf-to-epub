@@ -6,6 +6,8 @@
 package render
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -51,8 +53,9 @@ func Render(doc idm.Document, opts Options) (epub.Book, error) {
 		},
 	}
 
+	assets := &assets{}
 	for i, ch := range chapters {
-		body, pages := chapterXHTML(ch)
+		body, pages := chapterXHTML(ch, assets)
 
 		book.Chapters = append(book.Chapters, epub.Chapter{
 			Title: ch.title,
@@ -70,7 +73,47 @@ func Render(doc idm.Document, opts Options) (epub.Book, error) {
 		}
 	}
 
+	book.Images = assets.images
 	return book, nil
+}
+
+// assets names and deduplicates figures. The same logo or background often
+// appears on every page; embedding it once keeps the archive small.
+type assets struct {
+	names  map[string]string
+	images []epub.Image
+}
+
+func (a *assets) add(img *idm.Image) string {
+	if a.names == nil {
+		a.names = map[string]string{}
+	}
+
+	hash := sha256.Sum256(img.Data)
+	key := hex.EncodeToString(hash[:])
+	if name, ok := a.names[key]; ok {
+		return name
+	}
+
+	name := fmt.Sprintf("fig-%03d%s", len(a.images)+1, imageExtension(img.MediaType))
+	a.names[key] = name
+	a.images = append(a.images, epub.Image{Name: name, Data: img.Data, MediaType: img.MediaType})
+	return name
+}
+
+func imageExtension(mediaType string) string {
+	switch mediaType {
+	case "image/png":
+		return ".png"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	case "image/svg+xml":
+		return ".svg"
+	default:
+		return ".jpg"
+	}
 }
 
 type chapter struct {
@@ -215,7 +258,7 @@ func ParagraphText(paras []Paragraph) string {
 }
 
 // chapterXHTML renders the body fragment and reports which pages got anchors.
-func chapterXHTML(ch chapter) (string, []int) {
+func chapterXHTML(ch chapter, assets *assets) (string, []int) {
 	var (
 		b        strings.Builder
 		pages    []int
@@ -235,9 +278,9 @@ func chapterXHTML(ch chapter) (string, []int) {
 		switch {
 		case p.Kind == idm.KindHeading:
 			fmt.Fprintf(&b, "<h%d>%s</h%d>\n", p.Level, escape(p.Text), p.Level)
+		case p.Kind == idm.KindFigure && p.Image != nil:
+			fmt.Fprintf(&b, "<figure><img src=\"../images/%s\" alt=\"\"/></figure>\n", assets.add(p.Image))
 		case p.Kind == idm.KindFigure:
-			// Figures are not extracted yet; skipping keeps the body honest
-			// instead of emitting an empty paragraph.
 			continue
 		default:
 			fmt.Fprintf(&b, "<p>%s</p>\n", escape(p.Text))

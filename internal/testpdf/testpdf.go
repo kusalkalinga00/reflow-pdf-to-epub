@@ -11,10 +11,15 @@ import (
 )
 
 type config struct {
-	mediaBox func(page int) string
-	pages    [][]Line
-	hasPages bool
-	outline  []Bookmark
+	mediaBox      func(page int) string
+	pages         [][]Line
+	hasPages      bool
+	outline       []Bookmark
+	image         []byte
+	imageW        int
+	imageH        int
+	imageDisplayW float64
+	imageDisplayH float64
 }
 
 // Bookmark is one entry in the PDF outline, pointing at a 1-based page.
@@ -45,6 +50,18 @@ func WithLines(lines ...Line) Option {
 	return func(c *config) {
 		c.pages = [][]Line{lines}
 		c.hasPages = true
+	}
+}
+
+// WithImage draws a JPEG on the first page. The bytes must already be a JPEG;
+// displayWidth and displayHeight are in points.
+func WithImage(jpeg []byte, pixelWidth, pixelHeight int, displayWidth, displayHeight float64) Option {
+	return func(c *config) {
+		c.image = jpeg
+		c.imageW = pixelWidth
+		c.imageH = pixelHeight
+		c.imageDisplayW = displayWidth
+		c.imageDisplayH = displayHeight
 	}
 }
 
@@ -99,9 +116,17 @@ func Build(pages int, opts ...Option) []byte {
 				stream = contentStream(cfg.pages[i])
 			}
 		}
+		if i == 0 && len(cfg.image) > 0 {
+			stream += fmt.Sprintf("\nq %.2f 0 0 %.2f 150 300 cm /Im1 Do Q\n",
+				cfg.imageDisplayW, cfg.imageDisplayH)
+		}
+		resources := fmt.Sprintf("/Font << /F1 %d 0 R >>", font)
+		if len(cfg.image) > 0 {
+			resources += fmt.Sprintf(" /XObject << /Im1 %d 0 R >>", firstPage+2*pages)
+		}
 		objects[pageNum] = fmt.Sprintf(
-			"<< /Type /Page /Parent %d 0 R /MediaBox %s /Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>",
-			pagesObj, cfg.mediaBox(i+1), font, contentNum,
+			"<< /Type /Page /Parent %d 0 R /MediaBox %s /Resources << %s >> /Contents %d 0 R >>",
+			pagesObj, cfg.mediaBox(i+1), resources, contentNum,
 		)
 		objects[contentNum] = fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(stream), stream)
 	}
@@ -113,7 +138,17 @@ func Build(pages int, opts ...Option) []byte {
 	objects[font] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
 	objects[info] = "<< /Title (Test Document) /Author (Test Author) /Producer (testpdf) >>"
 
-	maxObj := firstPage + 2*pages
+	// The last page object is firstPage+2*(pages-1), and its content stream is
+	// the object after it; everything else starts at the next free number.
+	maxObj := firstPage + 2*pages - 1
+
+	if len(cfg.image) > 0 {
+		objects[maxObj+1] = fmt.Sprintf(
+			"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length %d >>\nstream\n%s\nendstream",
+			cfg.imageW, cfg.imageH, len(cfg.image), string(cfg.image),
+		)
+		maxObj++
+	}
 
 	if len(cfg.outline) > 0 {
 		outlinesNum := maxObj + 1

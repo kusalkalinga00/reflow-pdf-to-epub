@@ -279,6 +279,53 @@ func TestRenderPageListPointsAtTheContainingChapter(t *testing.T) {
 	}
 }
 
+func TestRenderEmbedsFigures(t *testing.T) {
+	doc := document([]idm.Block{
+		line("Text before the picture.", 1, 700, 710, 10),
+		{
+			Kind: idm.KindFigure, Page: 1,
+			BBox:       idm.Rect{X0: 100, Y0: 400, X1: 300, Y1: 600},
+			Confidence: 1,
+			Image:      &idm.Image{Data: []byte("jpeg-bytes"), MediaType: "image/jpeg"},
+		},
+	}, 1)
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	if len(book.Images) != 1 {
+		t.Fatalf("images = %d, want 1", len(book.Images))
+	}
+	if book.Images[0].Name != "fig-001.jpg" {
+		t.Errorf("image name = %q", book.Images[0].Name)
+	}
+
+	body := book.Chapters[0].Body
+	if !strings.Contains(body, `<figure><img src="../images/fig-001.jpg" alt=""/>`) {
+		t.Errorf("body does not reference the figure:\n%s", body)
+	}
+}
+
+func TestRenderDeduplicatesIdenticalFigures(t *testing.T) {
+	data := []byte("same-bytes")
+	doc := document([]idm.Block{
+		{Kind: idm.KindFigure, Page: 1, BBox: idm.Rect{X0: 10, Y0: 10, X1: 20, Y1: 20}, Confidence: 1,
+			Image: &idm.Image{Data: data, MediaType: "image/jpeg"}},
+		{Kind: idm.KindFigure, Page: 1, BBox: idm.Rect{X0: 30, Y0: 30, X1: 40, Y1: 40}, Confidence: 1,
+			Image: &idm.Image{Data: data, MediaType: "image/jpeg"}},
+	}, 1)
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if len(book.Images) != 1 {
+		t.Errorf("images = %d, want 1 after deduplication", len(book.Images))
+	}
+}
+
 func TestRenderEscapesMarkup(t *testing.T) {
 	doc := document([]idm.Block{
 		line(`Tom & Jerry <3 "quotes"`, 1, 600, 610, 10),

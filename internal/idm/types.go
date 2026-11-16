@@ -101,6 +101,10 @@ type Block struct {
 	// Confidence is 0..1 and records how sure the stage that produced this
 	// block is about its classification. It feeds the quality score.
 	Confidence float64 `json:"confidence"`
+	// Image is set only for figures that carry picture data. Data is excluded
+	// from JSON: a book's images are megabytes and the model is inspected as
+	// text.
+	Image *Image `json:"image,omitempty"`
 	// FontSize is the effective text size in points. Extraction derives it from
 	// the glyph bounding box, not from the PDF's nominal font size, because
 	// producers routinely draw 10pt text with a 1pt font and a scaling matrix.
@@ -110,6 +114,14 @@ type Block struct {
 	// Spans carries inline styling. It is optional: a block with no spans has
 	// no styling beyond its kind.
 	Spans []Span `json:"spans,omitempty"`
+}
+
+// Image is a figure recovered from the source.
+type Image struct {
+	Data        []byte `json:"-"`
+	MediaType   string `json:"mediaType"`
+	PixelWidth  int    `json:"pixelWidth,omitempty"`
+	PixelHeight int    `json:"pixelHeight,omitempty"`
 }
 
 // Span is a styled run of text inside a block.
@@ -141,6 +153,9 @@ type Features struct {
 	Tables          int `json:"tables,omitempty"`
 	Figures         int `json:"figures,omitempty"`
 	HeadingElements int `json:"headingElements,omitempty"`
+	// ImagesSkipped counts image objects the extraction could not embed, for
+	// example JPEG 2000, which EPUB does not support.
+	ImagesSkipped int `json:"imagesSkipped,omitempty"`
 }
 
 // Document is a whole source document.

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/klippa-app/go-pdfium"
+	"github.com/klippa-app/go-pdfium/enums"
 	"github.com/klippa-app/go-pdfium/references"
 	"github.com/klippa-app/go-pdfium/requests"
 	"github.com/klippa-app/go-pdfium/single_threaded"
@@ -50,6 +51,9 @@ type PDFium struct {
 	pool     pdfium.Pool
 	instance pdfium.Pdfium
 	opts     Options
+
+	// skippedImages accumulates images that could not be embedded.
+	skippedImages int
 }
 
 // NewPDFium starts a PDFium pool. Callers must Close it.
@@ -111,9 +115,8 @@ func (e *PDFium) Extract(ctx context.Context, src io.ReaderAt, size int64) (idm.
 	}
 
 	out := idm.Document{
-		Meta:     e.metadata(doc.Document),
-		Outline:  e.outline(doc.Document),
-		Features: e.features(doc.Document, count.PageCount),
+		Meta:    e.metadata(doc.Document),
+		Outline: e.outline(doc.Document),
 	}
 
 	for i := 0; i < count.PageCount; i++ {
@@ -128,6 +131,9 @@ func (e *PDFium) Extract(ctx context.Context, src io.ReaderAt, size int64) (idm.
 		out.Pages = append(out.Pages, page)
 		out.Blocks = append(out.Blocks, blocks...)
 	}
+
+	out.Features = e.features(doc.Document, count.PageCount)
+	out.Features.ImagesSkipped = e.skippedImages
 
 	if err := out.Validate(); err != nil {
 		return out, err
@@ -161,6 +167,9 @@ func (e *PDFium) extractPage(ctx context.Context, doc references.FPDF_DOCUMENT, 
 
 	// A page with no text layer is either blank or a scan. OCR is the only way
 	// to tell, and the only way to recover it.
+	figures, skipped := e.images(doc, index)
+	e.skippedImages += skipped
+
 	if len(lines) == 0 && e.opts.OCR != nil {
 		recognized, err := e.ocrPage(ctx, page, size.Width, size.Height)
 		if err != nil {
@@ -172,6 +181,8 @@ func (e *PDFium) extractPage(ctx context.Context, doc references.FPDF_DOCUMENT, 
 		}
 	}
 
+	blocks := append(blocksFromLines(lines, index+1), figures...)
+
 	out := idm.Page{
 		Number:       index + 1,
 		Width:        size.Width,
@@ -181,7 +192,7 @@ func (e *PDFium) extractPage(ctx context.Context, doc references.FPDF_DOCUMENT, 
 		TextCoverage: coverage(lines, size.Width, size.Height),
 	}
 
-	return out, blocksFromLines(lines, index+1), nil
+	return out, blocks, nil
 }
 
 // maxStructureElements bounds the walk over the structure tree. Tagged files can
@@ -355,6 +366,98 @@ func (e *PDFium) bookmarkPage(doc references.FPDF_DOCUMENT, bookmark references.
 	}
 
 	return 0
+}
+
+// minImagePixels drops images too small to be a figure: bullets, icons and
+// rules are drawn as images in some producers.
+const minImagePixels = 48
+
+// images collects JPEG figures from a page.
+//
+// Raw JPEG data can be embedded in an EPUB untouched, which keeps quality and
+// costs no re-encoding. Other encodings (Flate, JPEG 2000, CCITT) are counted
+// as skipped rather than decoded and re-encoded: silence would be worse than a
+// reported gap.
+func (e *PDFium) images(doc references.FPDF_DOCUMENT, index int) ([]idm.Block, int) {
+	page := requests.Page{ByIndex: &requests.PageByIndex{Document: doc, Index: index}}
+
+	objects, err := e.instance.FPDFPage_CountObjects(&requests.FPDFPage_CountObjects{Page: page})
+	if err != nil {
+		return nil, 0
+	}
+
+	var (
+		blocks  []idm.Block
+		skipped int
+	)
+
+	for i := 0; i < objects.Count; i++ {
+		obj, err := e.instance.FPDFPage_GetObject(&requests.FPDFPage_GetObject{Page: page, Index: i})
+		if err != nil {
+			continue
+		}
+
+		kind, err := e.instance.FPDFPageObj_GetType(&requests.FPDFPageObj_GetType{PageObject: obj.PageObject})
+		if err != nil || kind.Type != enums.FPDF_PAGEOBJ_IMAGE {
+			continue
+		}
+
+		// FPDFImageObj_GetImagePixelSize segfaults in this binding version, so
+		// the metadata call (which takes the page) is used instead.
+		meta, err := e.instance.FPDFImageObj_GetImageMetadata(&requests.FPDFImageObj_GetImageMetadata{
+			ImageObject: obj.PageObject,
+			Page:        page,
+		})
+		if err != nil || meta.ImageMetadata.Width < minImagePixels || meta.ImageMetadata.Height < minImagePixels {
+			continue
+		}
+
+		if filter, err := e.instance.FPDFImageObj_GetImageFilter(&requests.FPDFImageObj_GetImageFilter{
+			ImageObject: obj.PageObject,
+			Index:       0,
+		}); err != nil || filter.ImageFilter != "DCTDecode" {
+			skipped++
+			continue
+		}
+
+		raw, err := e.instance.FPDFImageObj_GetImageDataRaw(&requests.FPDFImageObj_GetImageDataRaw{
+			ImageObject: obj.PageObject,
+		})
+		if err != nil || len(raw.Data) == 0 {
+			skipped++
+			continue
+		}
+
+		bounds, err := e.instance.FPDFPageObj_GetBounds(&requests.FPDFPageObj_GetBounds{
+			PageObject: obj.PageObject,
+		})
+		if err != nil {
+			continue
+		}
+
+		box := idm.Rect{
+			X0: float64(bounds.Left), Y0: float64(bounds.Bottom),
+			X1: float64(bounds.Right), Y1: float64(bounds.Top),
+		}
+		if !box.Valid() || box.Area() <= 0 {
+			continue
+		}
+
+		blocks = append(blocks, idm.Block{
+			Kind:       idm.KindFigure,
+			Page:       index + 1,
+			BBox:       box,
+			Confidence: 1,
+			Image: &idm.Image{
+				Data:        raw.Data,
+				MediaType:   "image/jpeg",
+				PixelWidth:  int(meta.ImageMetadata.Width),
+				PixelHeight: int(meta.ImageMetadata.Height),
+			},
+		})
+	}
+
+	return blocks, skipped
 }
 
 // ocrPage renders the page and converts the recognized line boxes from image

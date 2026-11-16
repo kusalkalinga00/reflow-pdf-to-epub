@@ -152,6 +152,10 @@ func (d Document) Validate() error {
 				block.Level, block.Kind)
 		}
 
+		if block.Image != nil && block.Image.MediaType == "" {
+			add(path+".image.mediaType", "must be set when image data is present")
+		}
+
 		// Figures may be image-only. Every other kind must carry text.
 		if strings.TrimSpace(block.Text) == "" && block.Kind != KindFigure {
 			add(path+".text", "must not be empty for kind %q", block.Kind)

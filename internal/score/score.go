@@ -58,6 +58,8 @@ type Signals struct {
 	OutlineEntries  int     `json:"outlineEntries"`
 	Tables          int     `json:"tables"`
 	Figures         int     `json:"figures"`
+	FiguresEmbedded int     `json:"figuresEmbedded"`
+	ImagesSkipped   int     `json:"imagesSkipped"`
 	MeanCoverage    float64 `json:"meanCoverage"`
 }
 
@@ -126,10 +128,16 @@ func Evaluate(doc idm.Document, paras []render.Paragraph, chapters []string) Rep
 			s.Tables, plural(s.Tables))
 	}
 
-	if s.Figures > 0 {
-		deduct(min(10, 2*s.Figures), "FIGURES_DROPPED",
-			"Left %d figure%s in the PDF; images are not extracted yet.",
-			s.Figures, plural(s.Figures))
+	if missing := s.Figures - s.FiguresEmbedded; missing > 0 {
+		deduct(min(10, 2*missing), "FIGURES_DROPPED",
+			"Left %d figure%s in the PDF; they could not be extracted.",
+			missing, plural(missing))
+	}
+
+	if s.ImagesSkipped > 0 {
+		deduct(min(10, 2*s.ImagesSkipped), "IMAGES_SKIPPED",
+			"Skipped %d image%s in a format EPUB cannot embed.",
+			s.ImagesSkipped, plural(s.ImagesSkipped))
 	}
 
 	if s.OCRedPages > 0 {
@@ -205,6 +213,13 @@ func gather(doc idm.Document, paras []render.Paragraph, chapters []string) Signa
 	s.OutlineEntries = len(doc.Outline)
 	s.Tables = doc.Features.Tables
 	s.Figures = doc.Features.Figures
+	s.ImagesSkipped = doc.Features.ImagesSkipped
+
+	for _, b := range doc.Blocks {
+		if b.Image != nil {
+			s.FiguresEmbedded++
+		}
+	}
 
 	for _, title := range chapters {
 		if isGenericTitle(title) {

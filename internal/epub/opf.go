@@ -2,6 +2,7 @@ package epub
 
 import (
 	"fmt"
+	"path"
 
 	"github.com/beevik/etree"
 )
@@ -119,6 +120,10 @@ func (b *prepared) appendManifest(pkg *etree.Element) {
 	for i, ch := range b.chapters {
 		add(manifestID(i), ch.filename, mediaTypeXHTML, "")
 	}
+
+	for i, img := range b.images {
+		add(imageID(i), path.Join("images", img.Name), img.MediaType, "")
+	}
 }
 
 func (b *prepared) appendSpine(pkg *etree.Element) {
@@ -134,3 +139,5 @@ func (b *prepared) appendSpine(pkg *etree.Element) {
 }
 
 func manifestID(i int) string { return fmt.Sprintf("ch%03d", i+1) }
+
+func imageID(i int) string { return fmt.Sprintf("img%03d", i+1) }
