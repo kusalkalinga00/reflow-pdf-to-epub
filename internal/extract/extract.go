@@ -111,8 +111,9 @@ func (e *PDFium) Extract(ctx context.Context, src io.ReaderAt, size int64) (idm.
 	}
 
 	out := idm.Document{
-		Meta:    e.metadata(doc.Document),
-		Outline: e.outline(doc.Document),
+		Meta:     e.metadata(doc.Document),
+		Outline:  e.outline(doc.Document),
+		Features: e.features(doc.Document, count.PageCount),
 	}
 
 	for i := 0; i < count.PageCount; i++ {
@@ -181,6 +182,89 @@ func (e *PDFium) extractPage(ctx context.Context, doc references.FPDF_DOCUMENT, 
 	}
 
 	return out, blocksFromLines(lines, index+1), nil
+}
+
+// maxStructureElements bounds the walk over the structure tree. Tagged files can
+// carry tens of thousands of elements and the walk only produces counts.
+const maxStructureElements = 20000
+
+// features counts the structural elements a tagged PDF declares.
+//
+// It deliberately does not try to recover their content: mapping elements to
+// text needs marked content IDs, and many producers do not write them. Knowing
+// that a table exists is still worth a lot — it lets the quality report say the
+// table was flattened instead of pretending the conversion was perfect.
+func (e *PDFium) features(doc references.FPDF_DOCUMENT, pages int) idm.Features {
+	var (
+		out     idm.Features
+		visited int
+		walk    func(el references.FPDF_STRUCTELEMENT)
+	)
+
+	walk = func(el references.FPDF_STRUCTELEMENT) {
+		if visited >= maxStructureElements {
+			return
+		}
+		visited++
+
+		if typ, err := e.instance.FPDF_StructElement_GetType(&requests.FPDF_StructElement_GetType{
+			StructElement: el,
+		}); err == nil {
+			switch {
+			case typ.Type == "Table":
+				out.Tables++
+			case typ.Type == "Figure":
+				out.Figures++
+			case typ.Type == "H" || (len(typ.Type) == 2 && typ.Type[0] == 'H'):
+				out.HeadingElements++
+			}
+		}
+
+		children, err := e.instance.FPDF_StructElement_CountChildren(&requests.FPDF_StructElement_CountChildren{
+			StructElement: el,
+		})
+		if err != nil {
+			return
+		}
+		for i := 0; i < children.Count; i++ {
+			child, err := e.instance.FPDF_StructElement_GetChildAtIndex(&requests.FPDF_StructElement_GetChildAtIndex{
+				StructElement: el,
+				Index:         i,
+			})
+			if err == nil && child.StructElement != "" {
+				walk(child.StructElement)
+			}
+		}
+	}
+
+	for i := 0; i < pages; i++ {
+		tree, err := e.instance.FPDF_StructTree_GetForPage(&requests.FPDF_StructTree_GetForPage{
+			Page: requests.Page{ByIndex: &requests.PageByIndex{Document: doc, Index: i}},
+		})
+		if err != nil || tree.StructTree == "" {
+			continue
+		}
+		out.Tagged = true
+
+		children, err := e.instance.FPDF_StructTree_CountChildren(&requests.FPDF_StructTree_CountChildren{
+			StructTree: tree.StructTree,
+		})
+		if err == nil {
+			for j := 0; j < children.Count; j++ {
+				child, err := e.instance.FPDF_StructTree_GetChildAtIndex(&requests.FPDF_StructTree_GetChildAtIndex{
+					StructTree: tree.StructTree,
+					Index:      j,
+				})
+				if err == nil && child.StructElement != "" {
+					walk(child.StructElement)
+				}
+			}
+		}
+
+		e.instance.FPDF_StructTree_Close(&requests.FPDF_StructTree_Close{})
+	}
+
+	return out
 }
 
 // outline reads the PDF's own table of contents. Producers that write one are
