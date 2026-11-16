@@ -266,9 +266,29 @@ func prepare(book Book) (*prepared, error) {
 		})
 	}
 
+	// A page target that points at an anchor nobody defines is a broken link
+	// in every reading system, and epubcheck reports it as RSC-012.
+	bodies := make(map[string]string, len(b.chapters))
+	for _, ch := range b.chapters {
+		bodies[ch.filename] = ch.body
+	}
+
 	for i, pg := range b.pages {
 		if strings.TrimSpace(pg.Label) == "" || strings.TrimSpace(pg.Href) == "" {
 			return nil, fmt.Errorf("%w: pageList[%d] needs both a label and an href", ErrInvalidBook, i)
+		}
+
+		file, fragment, hasFragment := strings.Cut(pg.Href, "#")
+		if !hasFragment || fragment == "" {
+			continue
+		}
+
+		body, ok := bodies[file]
+		if !ok {
+			return nil, fmt.Errorf("%w: pageList[%d] points at unknown document %q", ErrInvalidBook, i, file)
+		}
+		if !strings.Contains(body, `id="`+fragment+`"`) {
+			return nil, fmt.Errorf("%w: pageList[%d] points at missing anchor %q in %s", ErrInvalidBook, i, fragment, file)
 		}
 	}
 

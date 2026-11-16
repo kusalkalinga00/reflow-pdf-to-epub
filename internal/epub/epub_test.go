@@ -27,11 +27,11 @@ func sampleBook() Book {
 			{
 				ID:    "ch-one",
 				Title: "The Long Road",
-				Body:  `<h1>Chapter 1</h1><p>The road bent north and the engine never stalled.</p>`,
+				Body:  `<span id="page-1"></span><h1>Chapter 1</h1><p>The road bent north and the engine never stalled.</p>`,
 			},
 			{
 				Title: "The Efficient Engine",
-				Body:  `<h1>Chapter 2</h1><p>It was rebuilt in the spring of 1892.</p>`,
+				Body:  `<span id="page-2"></span><h1>Chapter 2</h1><p>It was rebuilt in the spring of 1892.</p>`,
 			},
 		},
 		PageList: []PageTarget{
@@ -119,6 +119,21 @@ func findAll(el *etree.Element, tag string) []*etree.Element {
 	}
 	walk(el)
 	return found
+}
+
+func allElements(doc *etree.Document) []*etree.Element {
+	var out []*etree.Element
+	var walk func(*etree.Element)
+	walk = func(e *etree.Element) {
+		out = append(out, e)
+		for _, child := range e.ChildElements() {
+			walk(child)
+		}
+	}
+	if doc.Root() != nil {
+		walk(doc.Root())
+	}
+	return out
 }
 
 func firstOf(t *testing.T, doc *etree.Document, tag string) *etree.Element {
@@ -396,6 +411,37 @@ func TestPageListAppearsOnlyWhenPageTargetsExist(t *testing.T) {
 	})
 }
 
+func TestPageListFragmentsExist(t *testing.T) {
+	book := sampleBook()
+	book.PageList = []PageTarget{
+		{Label: "1", Href: "text/chapter-001.xhtml#page-1"},
+	}
+
+	a := openArchive(t, mustWrite(t, book))
+
+	for _, target := range book.PageList {
+		file, fragment, ok := strings.Cut(target.Href, "#")
+		if !ok {
+			t.Errorf("page target %q has no fragment", target.Href)
+			continue
+		}
+
+		doc := mustParseXML(t, a.mustGet(t, "OEBPS/"+file))
+		found := false
+		for _, el := range allElements(doc) {
+			if el.SelectAttrValue("id", "") == fragment {
+				found = true
+				break
+			}
+		}
+		if !found {
+			// epubcheck reports this as RSC-012: a link into a document that
+			// does not define the anchor.
+			t.Errorf("page target %q points at a missing id", target.Href)
+		}
+	}
+}
+
 func TestChapterDocuments(t *testing.T) {
 	a := openArchive(t, mustWrite(t, sampleBook()))
 
@@ -576,7 +622,7 @@ func TestInvalidBooksAreRejected(t *testing.T) {
 		},
 		{
 			"malformed chapter body",
-			func(b *Book) { b.Chapters[0].Body = `<p>unclosed` },
+			func(b *Book) { b.Chapters[0].Body = `<span id="page-1"></span><p>unclosed` },
 			"not well-formed",
 		},
 		{
