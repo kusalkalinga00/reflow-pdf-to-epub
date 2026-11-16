@@ -72,14 +72,26 @@ Convert a PDF into a reflowable EPUB 3 ebook.
 	}
 
 	progress("%d pages, %d blocks, %d chapters", result.Pages, result.Blocks, len(result.Chapters))
+	for _, issue := range result.Quality.Issues {
+		progress("  %s: %s", strings.ToUpper(string(issue.Severity)), issue.Message)
+	}
 
 	if err := writeFileAtomic(dest, result.EPUB); err != nil {
 		fmt.Fprintln(stderr, "reflow:", err)
 		return exitFailure
 	}
 
-	fmt.Fprintf(stdout, "wrote %s (%d pages, %d chapters)\n", dest, result.Pages, len(result.Chapters))
+	fmt.Fprintf(stdout, "wrote %s (%d pages, %d chapter%s, %s %d/100)\n",
+		dest, result.Pages, len(result.Chapters), plural(len(result.Chapters)),
+		result.Quality.Tier, result.Quality.Score)
 	return exitOK
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // writeFileAtomic writes through a temporary file so a failure never leaves a

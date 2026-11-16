@@ -47,6 +47,9 @@ func TestConvertWritesEPUB(t *testing.T) {
 	if !strings.Contains(stdout.String(), "3 pages") {
 		t.Errorf("stdout = %q, want the page count", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "/100") {
+		t.Errorf("stdout = %q, want a quality score", stdout.String())
+	}
 }
 
 func TestConvertProgressIsOptional(t *testing.T) {

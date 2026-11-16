@@ -9,6 +9,7 @@ package web
 import (
 	"context"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -159,6 +160,13 @@ func (s *Server) handleConvert(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", epubName(header.Filename)))
 	w.Header().Set("X-Reflow-Pages", strconv.Itoa(result.Pages))
 	w.Header().Set("X-Reflow-Chapters", strconv.Itoa(len(result.Chapters)))
+	w.Header().Set("X-Reflow-Tier", string(result.Quality.Tier))
+	w.Header().Set("X-Reflow-Score", strconv.Itoa(result.Quality.Score))
+	// The full report rides along as base64 so the page can explain the score
+	// without a second request that would convert the book again.
+	if report, err := json.Marshal(result.Quality); err == nil {
+		w.Header().Set("X-Reflow-Report", base64.StdEncoding.EncodeToString(report))
+	}
 	w.WriteHeader(http.StatusOK)
 
 	if _, err := w.Write(result.EPUB); err != nil {

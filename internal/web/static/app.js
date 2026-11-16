@@ -9,6 +9,7 @@ const status = document.getElementById("status");
 const result = document.getElementById("result");
 const stats = document.getElementById("stats");
 const download = document.getElementById("download");
+const issues = document.getElementById("issues");
 
 let currentFile = null;
 let objectURL = null;
@@ -98,10 +99,23 @@ form.addEventListener("submit", async (event) => {
     const pages = response.headers.get("X-Reflow-Pages") || "?";
     const chapters = response.headers.get("X-Reflow-Chapters") || "?";
 
+    const tier = response.headers.get("X-Reflow-Tier") || "";
+    const scoreValue = response.headers.get("X-Reflow-Score") || "";
+    const report = decodeReport(response.headers.get("X-Reflow-Report"));
+
     objectURL = URL.createObjectURL(blob);
     download.href = objectURL;
     download.download = currentFile.name.replace(/\.pdf$/i, "") + ".epub";
-    stats.textContent = pages + " pages · " + chapters + " chapters · " + formatSize(blob.size);
+    stats.textContent = pages + " pages · " + chapters + " chapters · " +
+      tierLabel(tier) + " " + scoreValue + "/100 · " + formatSize(blob.size);
+
+    issues.replaceChildren();
+    const warnings = ((report && report.issues) || []).filter((i) => i.severity === "warn");
+    for (const issue of warnings.slice(0, 3)) {
+      const item = document.createElement("li");
+      item.textContent = issue.message;
+      issues.appendChild(item);
+    }
 
     result.hidden = false;
     setStatus("Done. Your EPUB is ready.", "ok");
@@ -112,6 +126,24 @@ form.addEventListener("submit", async (event) => {
     submit.disabled = false;
   }
 });
+
+function tierLabel(tier) {
+  if (tier === "T1") return "Structured";
+  if (tier === "T2") return "Reflowed";
+  if (tier === "T3") return "Low confidence";
+  return "Converted";
+}
+
+function decodeReport(value) {
+  if (!value) return null;
+  try {
+    const binary = atob(value);
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    return JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    return null;
+  }
+}
 
 async function errorMessage(response) {
   try {

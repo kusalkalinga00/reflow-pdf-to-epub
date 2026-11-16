@@ -22,6 +22,7 @@ import (
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/layout"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/normalize"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/render"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/score"
 )
 
 // Options configures a Converter.
@@ -53,6 +54,9 @@ type Result struct {
 	// Text is the reading text, with paragraphs separated by a space. It is
 	// what the corpus scores; callers that only want the book can ignore it.
 	Text string
+
+	// Quality is the measured verdict: score, tier, and what was noticed.
+	Quality score.Report
 
 	Duration time.Duration
 }
@@ -98,7 +102,8 @@ func (c *Converter) Run(ctx context.Context, src io.ReaderAt, size int64, doc Do
 	document = normalize.Apply(document)
 	document = layout.Apply(document)
 
-	text := render.ParagraphText(render.GroupParagraphs(document.Body()))
+	paras := render.GroupParagraphs(document.Body())
+	text := render.ParagraphText(paras)
 
 	book, err := render.Render(document, render.Options{DefaultTitle: titleFallback(doc.Name)})
 	if err != nil {
@@ -115,12 +120,15 @@ func (c *Converter) Run(ctx context.Context, src io.ReaderAt, size int64, doc Do
 		chapters[i] = ch.Title
 	}
 
+	quality := score.Evaluate(document, paras, chapters)
+
 	return Result{
 		EPUB:     buf.Bytes(),
 		Pages:    document.PageCount(),
 		Blocks:   len(document.Blocks),
 		Chapters: chapters,
 		Text:     text,
+		Quality:  quality,
 		Duration: time.Since(start),
 	}, nil
 }
