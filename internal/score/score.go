@@ -54,6 +54,7 @@ type Signals struct {
 	BlankPages      int     `json:"blankPages"`
 	Furniture       int     `json:"furnitureRemoved"`
 	LowConfidence   int     `json:"lowConfidenceBlocks"`
+	OCRedPages      int     `json:"ocrPages"`
 	MeanCoverage    float64 `json:"meanCoverage"`
 }
 
@@ -108,6 +109,15 @@ func Evaluate(doc idm.Document, paras []render.Paragraph, chapters []string) Rep
 			100*s.LowConfidence/s.Blocks)
 	}
 
+	if s.OCRedPages > 0 {
+		r.Issues = append(r.Issues, Issue{
+			Severity: SeverityInfo,
+			Code:     "OCR_USED",
+			Message: fmt.Sprintf("%d page%s read with OCR; recognition errors are possible.",
+				s.OCRedPages, plural(s.OCRedPages)),
+		})
+	}
+
 	if s.Furniture > 0 {
 		r.Issues = append(r.Issues, Issue{
 			Severity: SeverityInfo,
@@ -149,6 +159,12 @@ func gather(doc idm.Document, paras []render.Paragraph, chapters []string) Signa
 			s.Furniture++
 		case b.Confidence < 0.6:
 			s.LowConfidence++
+		}
+	}
+
+	for _, page := range doc.Pages {
+		if page.Provenance == idm.ProvenanceOCR {
+			s.OCRedPages++
 		}
 	}
 
