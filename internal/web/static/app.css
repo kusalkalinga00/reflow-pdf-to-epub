@@ -162,6 +162,28 @@ a:focus-visible {
   font-size: 0.9rem;
 }
 
+.issues {
+  margin: 0 0 1rem;
+  padding-left: 1.1rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.issues:empty {
+  display: none;
+}
+
+.issues {
+  margin: 0 0 1rem;
+  padding-left: 1.1rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.issues:empty {
+  display: none;
+}
+
 .download {
   display: inline-block;
   padding: 0.6rem 1rem;
