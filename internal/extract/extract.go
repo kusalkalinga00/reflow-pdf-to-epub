@@ -110,7 +110,10 @@ func (e *PDFium) Extract(ctx context.Context, src io.ReaderAt, size int64) (idm.
 		return idm.Document{}, fmt.Errorf("page count: %w", err)
 	}
 
-	out := idm.Document{Meta: e.metadata(doc.Document)}
+	out := idm.Document{
+		Meta:    e.metadata(doc.Document),
+		Outline: e.outline(doc.Document),
+	}
 
 	for i := 0; i < count.PageCount; i++ {
 		if err := ctx.Err(); err != nil {
@@ -178,6 +181,96 @@ func (e *PDFium) extractPage(ctx context.Context, doc references.FPDF_DOCUMENT, 
 	}
 
 	return out, blocksFromLines(lines, index+1), nil
+}
+
+// outline reads the PDF's own table of contents. Producers that write one are
+// telling us the chapter structure directly, which beats inferring it from font
+// sizes.
+func (e *PDFium) outline(doc references.FPDF_DOCUMENT) []idm.OutlineEntry {
+	first, err := e.instance.FPDFBookmark_GetFirstChild(&requests.FPDFBookmark_GetFirstChild{
+		Document: doc,
+	})
+	if err != nil || first.Bookmark == nil {
+		return nil
+	}
+
+	var entries []idm.OutlineEntry
+	e.walkOutline(doc, *first.Bookmark, 1, &entries)
+	return entries
+}
+
+// maxOutlineDepth stops a malformed file from producing unbounded recursion.
+const maxOutlineDepth = 12
+
+func (e *PDFium) walkOutline(doc references.FPDF_DOCUMENT, bookmark references.FPDF_BOOKMARK, level int, entries *[]idm.OutlineEntry) {
+	if level > maxOutlineDepth {
+		return
+	}
+
+	current := bookmark
+	for {
+		title := ""
+		if res, err := e.instance.FPDFBookmark_GetTitle(&requests.FPDFBookmark_GetTitle{
+			Bookmark: current,
+		}); err == nil {
+			title = strings.TrimSpace(res.Title)
+		}
+
+		page := e.bookmarkPage(doc, current)
+		if title != "" {
+			*entries = append(*entries, idm.OutlineEntry{Title: title, Page: page, Level: level})
+		}
+
+		if child, err := e.instance.FPDFBookmark_GetFirstChild(&requests.FPDFBookmark_GetFirstChild{
+			Document: doc,
+			Bookmark: &current,
+		}); err == nil && child.Bookmark != nil {
+			e.walkOutline(doc, *child.Bookmark, level+1, entries)
+		}
+
+		next, err := e.instance.FPDFBookmark_GetNextSibling(&requests.FPDFBookmark_GetNextSibling{
+			Document: doc,
+			Bookmark: current,
+		})
+		if err != nil || next.Bookmark == nil {
+			return
+		}
+		current = *next.Bookmark
+	}
+}
+
+// bookmarkPage returns the 1-based page a bookmark points at, or 0.
+func (e *PDFium) bookmarkPage(doc references.FPDF_DOCUMENT, bookmark references.FPDF_BOOKMARK) int {
+	if dest, err := e.instance.FPDFBookmark_GetDest(&requests.FPDFBookmark_GetDest{
+		Document: doc,
+		Bookmark: bookmark,
+	}); err == nil && dest.Dest != nil {
+		if page, err := e.instance.FPDFDest_GetDestPageIndex(&requests.FPDFDest_GetDestPageIndex{
+			Document: doc,
+			Dest:     *dest.Dest,
+		}); err == nil {
+			return page.Index + 1
+		}
+	}
+
+	// Some bookmarks carry an action instead of a destination.
+	if action, err := e.instance.FPDFBookmark_GetAction(&requests.FPDFBookmark_GetAction{
+		Bookmark: bookmark,
+	}); err == nil && action.Action != nil {
+		if dest, err := e.instance.FPDFAction_GetDest(&requests.FPDFAction_GetDest{
+			Document: doc,
+			Action:   *action.Action,
+		}); err == nil && dest.Dest != nil {
+			if page, err := e.instance.FPDFDest_GetDestPageIndex(&requests.FPDFDest_GetDestPageIndex{
+				Document: doc,
+				Dest:     *dest.Dest,
+			}); err == nil {
+				return page.Index + 1
+			}
+		}
+	}
+
+	return 0
 }
 
 // ocrPage renders the page and converts the recognized line boxes from image
