@@ -141,6 +141,10 @@ type OutlineEntry struct {
 	Title string `json:"title"`
 	Page  int    `json:"page"`
 	Level int    `json:"level"`
+	// Y is the destination's vertical position on the page, in points from the
+	// bottom. It is 0 when the bookmark carries no position, which is treated
+	// as "top of the page".
+	Y float64 `json:"y,omitempty"`
 }
 
 // Features records structure the source declares but the conversion cannot

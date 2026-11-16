@@ -107,6 +107,9 @@ func (d Document) Validate() error {
 		if entry.Level < 1 {
 			add(path+".level", "must be at least 1, got %d", entry.Level)
 		}
+		if entry.Y < 0 || math.IsNaN(entry.Y) || math.IsInf(entry.Y, 0) {
+			add(path+".y", "must be zero or a positive finite number, got %v", entry.Y)
+		}
 	}
 
 	prevPage := 0

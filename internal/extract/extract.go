@@ -313,9 +313,11 @@ func (e *PDFium) walkOutline(doc references.FPDF_DOCUMENT, bookmark references.F
 			title = strings.TrimSpace(res.Title)
 		}
 
-		page := e.bookmarkPage(doc, current)
+		page, y := e.bookmarkPosition(doc, current)
 		if title != "" {
-			*entries = append(*entries, idm.OutlineEntry{Title: title, Page: page, Level: level})
+			*entries = append(*entries, idm.OutlineEntry{
+				Title: title, Page: page, Level: level, Y: y,
+			})
 		}
 
 		if child, err := e.instance.FPDFBookmark_GetFirstChild(&requests.FPDFBookmark_GetFirstChild{
@@ -336,18 +338,14 @@ func (e *PDFium) walkOutline(doc references.FPDF_DOCUMENT, bookmark references.F
 	}
 }
 
-// bookmarkPage returns the 1-based page a bookmark points at, or 0.
-func (e *PDFium) bookmarkPage(doc references.FPDF_DOCUMENT, bookmark references.FPDF_BOOKMARK) int {
+// bookmarkPosition returns the 1-based page a bookmark points at and its
+// vertical destination, or zero when it has none.
+func (e *PDFium) bookmarkPosition(doc references.FPDF_DOCUMENT, bookmark references.FPDF_BOOKMARK) (int, float64) {
 	if dest, err := e.instance.FPDFBookmark_GetDest(&requests.FPDFBookmark_GetDest{
 		Document: doc,
 		Bookmark: bookmark,
 	}); err == nil && dest.Dest != nil {
-		if page, err := e.instance.FPDFDest_GetDestPageIndex(&requests.FPDFDest_GetDestPageIndex{
-			Document: doc,
-			Dest:     *dest.Dest,
-		}); err == nil {
-			return page.Index + 1
-		}
+		return e.destPosition(doc, *dest.Dest)
 	}
 
 	// Some bookmarks carry an action instead of a destination.
@@ -358,16 +356,33 @@ func (e *PDFium) bookmarkPage(doc references.FPDF_DOCUMENT, bookmark references.
 			Document: doc,
 			Action:   *action.Action,
 		}); err == nil && dest.Dest != nil {
-			if page, err := e.instance.FPDFDest_GetDestPageIndex(&requests.FPDFDest_GetDestPageIndex{
-				Document: doc,
-				Dest:     *dest.Dest,
-			}); err == nil {
-				return page.Index + 1
-			}
+			return e.destPosition(doc, *dest.Dest)
 		}
 	}
 
-	return 0
+	return 0, 0
+}
+
+// destPosition reads the page and vertical position of a destination. Most
+// bookmarks in real documents point inside a page rather than at its top, which
+// is the only way to recover sections of a one-page document.
+func (e *PDFium) destPosition(doc references.FPDF_DOCUMENT, dest references.FPDF_DEST) (int, float64) {
+	page := 0
+	if index, err := e.instance.FPDFDest_GetDestPageIndex(&requests.FPDFDest_GetDestPageIndex{
+		Document: doc,
+		Dest:     dest,
+	}); err == nil {
+		page = index.Index + 1
+	}
+
+	y := 0.0
+	if location, err := e.instance.FPDFDest_GetLocationInPage(&requests.FPDFDest_GetLocationInPage{
+		Dest: dest,
+	}); err == nil && location.Y != nil {
+		y = float64(*location.Y)
+	}
+
+	return page, y
 }
 
 // minImagePixels drops images too small to be a figure: bullets, icons and
