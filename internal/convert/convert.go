@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -24,7 +25,12 @@ import (
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ocr"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/render"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/score"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/validate"
 )
+
+// ErrInvalidOutput means the book was built but the reference validator
+// rejected it. It is never handed to the caller.
+var ErrInvalidOutput = errors.New("the generated EPUB failed validation")
 
 // Options configures a Converter.
 type Options struct {
@@ -37,6 +43,8 @@ type Options struct {
 	Now time.Time
 	// OCR reads pages that have no text layer. Nil disables it.
 	OCR ocr.Recognizer
+	// Validator runs EPUBCheck over the finished book. Nil skips validation.
+	Validator *validate.EpubCheck
 }
 
 // DocOptions describe one document within a Converter.
@@ -60,6 +68,8 @@ type Result struct {
 
 	// Quality is the measured verdict: score, tier, and what was noticed.
 	Quality score.Report
+	// Validation is the external validator's verdict, when one ran.
+	Validation *validate.Report
 
 	Duration time.Duration
 }
@@ -128,14 +138,29 @@ func (c *Converter) Run(ctx context.Context, src io.ReaderAt, size int64, doc Do
 
 	quality := score.Evaluate(document, paras, chapters)
 
+	var validation *validate.Report
+	if c.opts.Validator != nil {
+		report, err := c.validate(ctx, buf.Bytes())
+		if err != nil {
+			return Result{}, err
+		}
+		validation = &report
+		if !report.OK() {
+			// Fail closed: an artifact the reference validator rejects is not
+			// a book, and handing it over would waste the reader's time.
+			return Result{}, fmt.Errorf("%w: %s", ErrInvalidOutput, report.Summary())
+		}
+	}
+
 	return Result{
-		EPUB:     buf.Bytes(),
-		Pages:    document.PageCount(),
-		Blocks:   len(document.Blocks),
-		Chapters: chapters,
-		Text:     text,
-		Quality:  quality,
-		Duration: time.Since(start),
+		EPUB:       buf.Bytes(),
+		Pages:      document.PageCount(),
+		Blocks:     len(document.Blocks),
+		Chapters:   chapters,
+		Text:       text,
+		Quality:    quality,
+		Validation: validation,
+		Duration:   time.Since(start),
 	}, nil
 }
 
@@ -148,6 +173,25 @@ func Convert(ctx context.Context, src io.ReaderAt, size int64, opts Options, doc
 	defer c.Close()
 
 	return c.Run(ctx, src, size, doc)
+}
+
+// validate runs the external validator over the finished bytes.
+func (c *Converter) validate(ctx context.Context, data []byte) (validate.Report, error) {
+	tmp, err := os.CreateTemp("", "reflow-validate-*.epub")
+	if err != nil {
+		return validate.Report{}, err
+	}
+	defer os.Remove(tmp.Name())
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return validate.Report{}, err
+	}
+	if err := tmp.Close(); err != nil {
+		return validate.Report{}, err
+	}
+
+	return c.opts.Validator.Check(ctx, tmp.Name())
 }
 
 // Explain turns a pipeline error into a sentence a user can act on.
@@ -163,6 +207,8 @@ func Explain(err error) string {
 		return "This PDF has no extractable text. It looks like a scan, and OCR is not available yet."
 	case errors.Is(err, ingest.ErrInvalid):
 		return "This file is not a readable PDF."
+	case errors.Is(err, ErrInvalidOutput):
+		return "The book was built but failed EPUB validation, so it was not written. " + err.Error()
 	default:
 		return err.Error()
 	}
