@@ -34,7 +34,23 @@ make run -- serve
 A single page: drop a PDF, get an EPUB. Conversion happens in memory inside the
 request, so nothing is written to disk or kept afterwards. The server binds to
 localhost and has no accounts, no storage, and no queue — it runs the same
-`internal/convert` pipeline as the CLI.
+`internal/convert` pipeline as the CLI, and shows the quality report with the
+download.
+
+## Quality
+
+Every conversion is scored from measured signals — page coverage, chapter and
+heading detection, running-header removal — and labelled with a fidelity tier.
+
+| Tier | Meaning |
+|---|---|
+| T1 Structured | chapters and headings were detected |
+| T2 Reflowed | clean text, but the structure is uncertain |
+| T3 | reserved for the page-image path, which does not exist yet |
+
+`reflow convert` prints the tier and score, the web UI shows them with the
+reasons, and the HTTP API carries them in `X-Reflow-Tier` and `X-Reflow-Score`
+with the full report in `X-Reflow-Report`.
 
 ## Non-goals
 
