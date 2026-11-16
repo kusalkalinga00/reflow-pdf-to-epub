@@ -591,6 +591,28 @@ func TestDuplicateImageNamesAreRejected(t *testing.T) {
 	}
 }
 
+func TestImagesWithoutAltTextAreRejected(t *testing.T) {
+	book := sampleBook()
+	book.Chapters[0].Body = `<span id="page-1"></span><p>Text</p><img src="../images/fig-001.jpg"/>`
+
+	_, err := WriteBytes(book)
+	if err == nil {
+		t.Fatal("an image without alt text was accepted")
+	}
+	if !strings.Contains(err.Error(), "alt") {
+		t.Errorf("error = %q, want it to mention alt text", err)
+	}
+}
+
+func TestEmptyAltTextIsAccepted(t *testing.T) {
+	book := sampleBook()
+	book.Chapters[0].Body = `<span id="page-1"></span><p>Text</p><img src="../images/fig-001.jpg" alt=""/>`
+
+	if _, err := WriteBytes(book); err != nil {
+		t.Fatalf("an image with empty alt text is valid for a decorative figure: %v", err)
+	}
+}
+
 func TestCoverMediaTypeIsRequiredToBeKnown(t *testing.T) {
 	book := sampleBook()
 	book.Cover = &Cover{Data: []byte("%PDF-1.7"), MediaType: "application/pdf"}
