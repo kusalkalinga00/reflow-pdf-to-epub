@@ -123,11 +123,20 @@ type Span struct {
 	Href string `json:"href,omitempty"`
 }
 
+// OutlineEntry is one bookmark from the PDF's own table of contents. Page is
+// 1-based, or 0 when the bookmark does not point at a page.
+type OutlineEntry struct {
+	Title string `json:"title"`
+	Page  int    `json:"page"`
+	Level int    `json:"level"`
+}
+
 // Document is a whole source document.
 type Document struct {
-	Meta   Metadata `json:"meta"`
-	Pages  []Page   `json:"pages"`
-	Blocks []Block  `json:"blocks"`
+	Meta    Metadata       `json:"meta"`
+	Pages   []Page         `json:"pages"`
+	Blocks  []Block        `json:"blocks"`
+	Outline []OutlineEntry `json:"outline,omitempty"`
 }
 
 // PageCount returns the number of pages.

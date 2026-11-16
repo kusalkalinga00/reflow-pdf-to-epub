@@ -95,6 +95,20 @@ func (d Document) Validate() error {
 		}
 	}
 
+	for i, entry := range d.Outline {
+		path := fmt.Sprintf("outline[%d]", i)
+
+		if strings.TrimSpace(entry.Title) == "" {
+			add(path+".title", "must not be empty")
+		}
+		if entry.Page < 0 || entry.Page > len(d.Pages) {
+			add(path+".page", "must be within [0,%d], got %d", len(d.Pages), entry.Page)
+		}
+		if entry.Level < 1 {
+			add(path+".level", "must be at least 1, got %d", entry.Level)
+		}
+	}
+
 	prevPage := 0
 	for i, block := range d.Blocks {
 		path := fmt.Sprintf("blocks[%d]", i)
