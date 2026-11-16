@@ -74,7 +74,10 @@ make check      # gofmt, go.mod tidy, vet, tests with -race
 ```
 
 Text extraction goes through PDFium, which is a native library, so the build
-needs CGO. `make deps` fetches a pinned build from `pdfium-binaries` and writes
+needs CGO. Scanned pages are read with Tesseract when it is installed
+(`apt-get install tesseract-ocr`, `brew install tesseract`); without it those
+pages stay empty and the quality report says so. `convert -ocr=false` turns the
+fallback off. `make deps` fetches a pinned build from `pdfium-binaries` and writes
 the `pkg-config` file that points at it; `build`, `test`, and `check` run it
 automatically. The rpath is baked in, so binaries and test suites run without
 setting `DYLD_LIBRARY_PATH`.
