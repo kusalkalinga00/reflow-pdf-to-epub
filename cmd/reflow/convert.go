@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ocr"
 )
 
 func convertCmd(args []string, stdout, stderr io.Writer) int {
@@ -26,6 +27,7 @@ Convert a PDF into a reflowable EPUB 3 ebook.
 
 	outPath := fs.String("o", "", "output EPUB path (default: the input name with .epub)")
 	quiet := fs.Bool("q", false, "suppress progress messages")
+	useOCR := fs.Bool("ocr", true, "read pages with no text layer using tesseract")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -65,7 +67,15 @@ Convert a PDF into a reflowable EPUB 3 ebook.
 
 	progress("%s: %d bytes", path, info.Size())
 
-	result, err := convert.Convert(ctx, f, info.Size(), convert.Options{}, convert.DocOptions{Name: filepath.Base(path)})
+	var recognizer ocr.Recognizer
+	if *useOCR {
+		recognizer, err = ocr.NewTesseract()
+		if err != nil {
+			progress("OCR disabled: %v", err)
+		}
+	}
+
+	result, err := convert.Convert(ctx, f, info.Size(), convert.Options{OCR: recognizer}, convert.DocOptions{Name: filepath.Base(path)})
 	if err != nil {
 		fmt.Fprintln(stderr, "reflow:", convert.Explain(err))
 		return exitFailure
