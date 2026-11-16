@@ -515,6 +515,22 @@ func samplesToImage(data []byte, width, height int, space enums.FPDF_COLORSPACE,
 		}
 		return img
 
+	case space == enums.FPDF_COLORSPACE_DEVICECMYK && len(data) >= width*height*4:
+		// Print-oriented PDFs store photographs as CMYK. A naive conversion is
+		// not colour-managed, but it is far better than dropping the figure.
+		img := image.NewRGBA(image.Rect(0, 0, width, height))
+		for i := 0; i < width*height; i++ {
+			c := int(data[i*4+0])
+			m := int(data[i*4+1])
+			y := int(data[i*4+2])
+			k := int(data[i*4+3])
+			img.Pix[i*4+0] = uint8((255 - c) * (255 - k) / 255)
+			img.Pix[i*4+1] = uint8((255 - m) * (255 - k) / 255)
+			img.Pix[i*4+2] = uint8((255 - y) * (255 - k) / 255)
+			img.Pix[i*4+3] = 0xff
+		}
+		return img
+
 	case (space == enums.FPDF_COLORSPACE_DEVICEGRAY || space == enums.FPDF_COLORSPACE_CALGRAY) && bitsPerPixel == 8:
 		if len(data) < width*height {
 			return nil
