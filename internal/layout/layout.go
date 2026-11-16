@@ -204,6 +204,12 @@ func clampInt(v, lo, hi int) int {
 	return v
 }
 
+// furnitureZone is the fraction of the page height at the top and bottom where
+// a running header or footer can live. Five percent is a header at 95% of the
+// page; anything further in is body text, and treating it as furniture silently
+// deletes content.
+const furnitureZone = 0.95
+
 // markFurniture flags running headers and footers in place.
 //
 // A block is furniture when it sits at the top or bottom of the page and its
@@ -229,8 +235,8 @@ func markFurniture(byPage [][]idm.Block, pages []idm.Page) {
 				continue
 			}
 
-			top := b.BBox.Y1 >= 0.9*page.Height
-			bottom := b.BBox.Y0 <= 0.1*page.Height
+			top := b.BBox.Y1 >= furnitureZone*page.Height
+			bottom := b.BBox.Y0 <= (1-furnitureZone)*page.Height
 			if !top && !bottom {
 				continue
 			}
@@ -261,8 +267,8 @@ func markFurniture(byPage [][]idm.Block, pages []idm.Page) {
 				continue
 			}
 
-			top := b.BBox.Y1 >= 0.9*page.Height
-			bottom := b.BBox.Y0 <= 0.1*page.Height
+			top := b.BBox.Y1 >= furnitureZone*page.Height
+			bottom := b.BBox.Y0 <= (1-furnitureZone)*page.Height
 			if !top && !bottom {
 				continue
 			}
