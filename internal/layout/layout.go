@@ -18,12 +18,6 @@ import (
 // Apply returns a copy of doc with blocks in reading order and page furniture
 // marked. The input document is not modified.
 func Apply(doc idm.Document) idm.Document {
-	out := idm.Document{
-		Meta:    doc.Meta,
-		Pages:   doc.Pages,
-		Outline: doc.Outline,
-	}
-
 	byPage := make([][]idm.Block, len(doc.Pages))
 	for _, b := range doc.Blocks {
 		if b.Page < 1 || b.Page > len(byPage) {
@@ -38,11 +32,12 @@ func Apply(doc idm.Document) idm.Document {
 		byPage[i] = orderPage(byPage[i], doc.Pages[i])
 	}
 
+	var blocks []idm.Block
 	for _, page := range byPage {
-		out.Blocks = append(out.Blocks, page...)
+		blocks = append(blocks, page...)
 	}
 
-	return out
+	return doc.WithBlocks(blocks)
 }
 
 // orderPage puts one page's blocks into reading order.

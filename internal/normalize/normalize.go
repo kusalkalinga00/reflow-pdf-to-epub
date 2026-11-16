@@ -18,12 +18,12 @@ import (
 
 // Apply returns a copy of doc with every block's text normalized.
 func Apply(doc idm.Document) idm.Document {
-	out := doc
-	out.Blocks = make([]idm.Block, len(doc.Blocks))
+	blocks := make([]idm.Block, len(doc.Blocks))
+	out := doc.WithBlocks(blocks)
 
 	for i, b := range doc.Blocks {
-		out.Blocks[i] = b
-		out.Blocks[i].Text = Text(b.Text)
+		blocks[i] = b
+		blocks[i].Text = Text(b.Text)
 
 		if len(b.Spans) == 0 {
 			continue
@@ -40,10 +40,10 @@ func Apply(doc idm.Document) idm.Document {
 			spans[j].Text = spanText(s.Text)
 			joined.WriteString(spans[j].Text)
 		}
-		if joined.String() != out.Blocks[i].Text {
+		if joined.String() != blocks[i].Text {
 			continue
 		}
-		out.Blocks[i].Spans = spans
+		blocks[i].Spans = spans
 	}
 
 	return out
