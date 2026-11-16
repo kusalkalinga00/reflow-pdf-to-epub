@@ -230,6 +230,50 @@ func TestOutlineGivesStructureWithoutHeadings(t *testing.T) {
 	}
 }
 
+func TestFlattenedTablesCostPoints(t *testing.T) {
+	doc := document(2, 0.3, block(idm.KindParagraph, 1))
+	doc.Features.Tables = 1
+
+	report := score.Evaluate(doc, paragraphs(), []string{"Chapter One"})
+
+	if report.Signals.Tables != 1 {
+		t.Fatalf("tables = %d, want 1", report.Signals.Tables)
+	}
+	if report.Score != 95 {
+		t.Errorf("score = %d, want 95", report.Score)
+	}
+	if !hasIssue(report, "TABLES_FLATTENED") {
+		t.Errorf("issues = %v, want TABLES_FLATTENED", report.Issues)
+	}
+}
+
+func TestDroppedFiguresCostPoints(t *testing.T) {
+	doc := document(2, 0.3, block(idm.KindParagraph, 1))
+	doc.Features.Figures = 3
+
+	report := score.Evaluate(doc, paragraphs(), []string{"Chapter One"})
+
+	if report.Score != 94 {
+		t.Errorf("score = %d, want 94", report.Score)
+	}
+	if !hasIssue(report, "FIGURES_DROPPED") {
+		t.Errorf("issues = %v, want FIGURES_DROPPED", report.Issues)
+	}
+}
+
+func TestUnsupportedStructureIsCapped(t *testing.T) {
+	doc := document(2, 0.3, block(idm.KindParagraph, 1))
+	doc.Features.Tables = 40
+	doc.Features.Figures = 40
+
+	report := score.Evaluate(doc, paragraphs(), []string{"Chapter One"})
+
+	// Deductions are capped so one bad page cannot zero an otherwise good book.
+	if report.Score != 80 {
+		t.Errorf("score = %d, want 80 (10 for tables, 10 for figures)", report.Score)
+	}
+}
+
 func TestSummaryMatchesTier(t *testing.T) {
 	structured := score.Evaluate(document(1, 0.3, block(idm.KindParagraph, 1)), paragraphs(), []string{"Chapter One"})
 	if !strings.Contains(structured.Summary, "Structured") {

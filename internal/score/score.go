@@ -56,6 +56,8 @@ type Signals struct {
 	LowConfidence   int     `json:"lowConfidenceBlocks"`
 	OCRedPages      int     `json:"ocrPages"`
 	OutlineEntries  int     `json:"outlineEntries"`
+	Tables          int     `json:"tables"`
+	Figures         int     `json:"figures"`
 	MeanCoverage    float64 `json:"meanCoverage"`
 }
 
@@ -116,6 +118,18 @@ func Evaluate(doc idm.Document, paras []render.Paragraph, chapters []string) Rep
 			Code:     "OUTLINE_USED",
 			Message:  fmt.Sprintf("Chapters follow the PDF's own outline (%d entries).", s.OutlineEntries),
 		})
+	}
+
+	if s.Tables > 0 {
+		deduct(min(10, 5*s.Tables), "TABLES_FLATTENED",
+			"Flattened %d table%s into running text; the column layout is lost.",
+			s.Tables, plural(s.Tables))
+	}
+
+	if s.Figures > 0 {
+		deduct(min(10, 2*s.Figures), "FIGURES_DROPPED",
+			"Left %d figure%s in the PDF; images are not extracted yet.",
+			s.Figures, plural(s.Figures))
 	}
 
 	if s.OCRedPages > 0 {
@@ -189,6 +203,8 @@ func gather(doc idm.Document, paras []render.Paragraph, chapters []string) Signa
 	}
 
 	s.OutlineEntries = len(doc.Outline)
+	s.Tables = doc.Features.Tables
+	s.Figures = doc.Features.Figures
 
 	for _, title := range chapters {
 		if isGenericTitle(title) {
