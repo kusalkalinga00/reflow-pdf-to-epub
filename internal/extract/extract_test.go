@@ -220,6 +220,48 @@ func TestExtractDecodesFlateImages(t *testing.T) {
 	}
 }
 
+func TestExtractConvertsCmykImages(t *testing.T) {
+	const size = 60
+
+	// A cyan-free, black-free CMYK block: pure red once converted.
+	cmyk := make([]byte, size*size*4)
+	for i := 0; i < size*size; i++ {
+		cmyk[i*4+0] = 0
+		cmyk[i*4+1] = 255
+		cmyk[i*4+2] = 255
+		cmyk[i*4+3] = 0
+	}
+
+	pdf := testpdf.Build(1, testpdf.WithCMYKImage(cmyk, size, size, 200, 200))
+
+	doc, err := extractBytes(t, newExtractor(t, extract.Options{}), pdf)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+
+	var figure *idm.Block
+	for i := range doc.Blocks {
+		if doc.Blocks[i].Image != nil {
+			figure = &doc.Blocks[i]
+		}
+	}
+	if figure == nil {
+		t.Fatal("no figure was recovered")
+	}
+	if figure.Image.MediaType != "image/png" {
+		t.Fatalf("media type = %q, want image/png", figure.Image.MediaType)
+	}
+
+	img, err := png.Decode(bytes.NewReader(figure.Image.Data))
+	if err != nil {
+		t.Fatalf("recovered image is not a PNG: %v", err)
+	}
+	r, g, b, _ := img.At(size/2, size/2).RGBA()
+	if r>>8 < 200 || g>>8 > 60 || b>>8 > 60 {
+		t.Errorf("centre pixel = %d,%d,%d, want a red pixel", r>>8, g>>8, b>>8)
+	}
+}
+
 func TestExtractRejectsCorruptInput(t *testing.T) {
 	_, err := extractBytes(t, newExtractor(t, extract.Options{}), []byte("this is not a pdf"))
 	if err == nil {
