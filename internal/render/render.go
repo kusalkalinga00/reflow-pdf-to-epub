@@ -124,6 +124,19 @@ func chapterTitle(doc idm.Document) string {
 	return "Content"
 }
 
+// ParagraphText joins grouped paragraphs the way a reader reads them: in
+// order, separated by a single space.
+func ParagraphText(paras []Paragraph) string {
+	var b strings.Builder
+	for _, p := range paras {
+		if b.Len() > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(p.Text)
+	}
+	return b.String()
+}
+
 // chapterXHTML renders the body fragment and reports which pages got anchors.
 func chapterXHTML(ch chapter) (string, []int) {
 	var (

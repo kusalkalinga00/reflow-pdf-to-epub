@@ -10,7 +10,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/extract"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ingest"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/layout"
@@ -92,11 +92,11 @@ Without -json, a summary is printed instead.
 }
 
 func runExtraction(ctx context.Context, path string) (idm.Document, error) {
-	e, err := extract.NewPDFium(extract.Options{})
+	converter, err := convert.New(convert.Options{})
 	if err != nil {
 		return idm.Document{}, err
 	}
-	defer e.Close()
+	defer converter.Close()
 
 	f, err := os.Open(path)
 	if err != nil {
@@ -109,7 +109,7 @@ func runExtraction(ctx context.Context, path string) (idm.Document, error) {
 		return idm.Document{}, err
 	}
 
-	doc, err := e.Extract(ctx, f, st.Size())
+	doc, err := converter.Raw(ctx, f, st.Size())
 	if err != nil {
 		return idm.Document{}, fmt.Errorf("could not read text from the PDF: %w", err)
 	}

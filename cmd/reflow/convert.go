@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -12,14 +11,10 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/epub"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ingest"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/layout"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/normalize"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/render"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
 )
 
-func convert(args []string, stdout, stderr io.Writer) int {
+func convertCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("convert", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
@@ -55,58 +50,48 @@ Convert a PDF into a reflowable EPUB 3 ebook.
 		}
 	}
 
-	info, err := ingest.CheckFile(ctx, path, ingest.DefaultLimits)
+	f, err := os.Open(path)
 	if err != nil {
-		fmt.Fprintln(stderr, "reflow:", describeIngestError(err))
+		fmt.Fprintln(stderr, "reflow:", err)
 		return exitFailure
 	}
-	progress("%s: %d pages", path, info.Pages)
+	defer f.Close()
 
-	doc, err := runExtraction(ctx, path)
+	info, err := f.Stat()
 	if err != nil {
 		fmt.Fprintln(stderr, "reflow:", err)
 		return exitFailure
 	}
 
-	doc.Meta.SourceName = filepath.Base(path)
-	if doc.Meta.Title == "" {
-		doc.Meta.Title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	}
-	progress("recovered %d blocks", len(doc.Blocks))
+	progress("%s: %d bytes", path, info.Size())
 
-	doc = normalize.Apply(doc)
-	doc = layout.Apply(doc)
-
-	book, err := render.Render(doc, render.Options{})
+	result, err := convert.Convert(ctx, f, info.Size(), convert.Options{}, convert.DocOptions{Name: filepath.Base(path)})
 	if err != nil {
-		if errors.Is(err, render.ErrNoText) {
-			fmt.Fprintln(stderr, "reflow: this PDF has no extractable text. It looks like a scan, and OCR is not implemented yet.")
-			return exitFailure
-		}
-		fmt.Fprintln(stderr, "reflow:", err)
+		fmt.Fprintln(stderr, "reflow:", convert.Explain(err))
 		return exitFailure
 	}
-	progress("%d chapters", len(book.Chapters))
 
-	if err := writeBook(dest, book); err != nil {
+	progress("%d pages, %d blocks, %d chapters", result.Pages, result.Blocks, len(result.Chapters))
+
+	if err := writeFileAtomic(dest, result.EPUB); err != nil {
 		fmt.Fprintln(stderr, "reflow:", err)
 		return exitFailure
 	}
 
-	fmt.Fprintf(stdout, "wrote %s (%d pages, %d chapters)\n", dest, doc.PageCount(), len(book.Chapters))
+	fmt.Fprintf(stdout, "wrote %s (%d pages, %d chapters)\n", dest, result.Pages, len(result.Chapters))
 	return exitOK
 }
 
-// writeBook writes to a temporary file and renames it, so a failed conversion
-// never leaves a truncated EPUB behind.
-func writeBook(dest string, book epub.Book) error {
-	tmp, err := os.CreateTemp(filepath.Dir(dest), ".reflow-*.epub")
+// writeFileAtomic writes through a temporary file so a failure never leaves a
+// truncated book behind.
+func writeFileAtomic(dest string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(dest), ".reflow-*.tmp")
 	if err != nil {
 		return err
 	}
 	defer os.Remove(tmp.Name())
 
-	if err := epub.Write(tmp, book); err != nil {
+	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		return err
 	}

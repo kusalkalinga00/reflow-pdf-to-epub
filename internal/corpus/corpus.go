@@ -8,10 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/extract"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/layout"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/normalize"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/render"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
 )
 
 // Thresholds a case must meet to pass. They are deliberately strict: the
@@ -65,29 +62,30 @@ type Result struct {
 // Run converts every case and scores it. One PDFium pool is shared for the
 // whole run.
 func Run(cases []Case) []Result {
-	extractor, err := extract.NewPDFium(extract.Options{})
+	converter, err := convert.New(convert.Options{})
 	if err != nil {
 		results := make([]Result, len(cases))
 		for i, c := range cases {
-			results[i] = Result{Name: c.Name, Failure: fmt.Sprintf("start pdfium: %v", err)}
+			results[i] = Result{Name: c.Name, Failure: fmt.Sprintf("start converter: %v", err)}
 		}
 		return results
 	}
-	defer extractor.Close()
+	defer converter.Close()
 
 	results := make([]Result, 0, len(cases))
 	for _, c := range cases {
-		results = append(results, runCase(extractor, c))
+		results = append(results, runCase(converter, c))
 	}
 	return results
 }
 
-func runCase(extractor *extract.PDFium, c Case) (res Result) {
+func runCase(converter *convert.Converter, c Case) (res Result) {
 	start := time.Now()
 	defer func() { res.Duration = time.Since(start) }()
 	res.Name = c.Name
 
-	text, chapters, err := pipeline(extractor, c.PDF)
+	out, err := converter.Run(context.Background(), bytes.NewReader(c.PDF), int64(len(c.PDF)), convert.DocOptions{Name: c.Name + ".pdf"})
+	text, chapters := out.Text, out.Chapters
 	res.Text = text
 	res.ChapterTitles = chapters
 
@@ -134,42 +132,6 @@ func runCase(extractor *extract.PDFium, c Case) (res Result) {
 	res.Pass = len(problems) == 0
 	res.Failure = strings.Join(problems, "; ")
 	return res
-}
-
-// pipeline runs the same stages the CLI runs, in the same order.
-func pipeline(extractor *extract.PDFium, pdf []byte) (string, []string, error) {
-	doc, err := extractor.Extract(context.Background(), bytes.NewReader(pdf), int64(len(pdf)))
-	if err != nil {
-		return "", nil, err
-	}
-
-	doc = normalize.Apply(doc)
-	doc = layout.Apply(doc)
-
-	text := ParagraphText(render.GroupParagraphs(doc.Body()))
-
-	book, err := render.Render(doc, render.Options{})
-	if err != nil {
-		return text, nil, err
-	}
-
-	titles := make([]string, len(book.Chapters))
-	for i, ch := range book.Chapters {
-		titles[i] = ch.Title
-	}
-	return text, titles, nil
-}
-
-// ParagraphText joins grouped paragraphs the way a reader would read them.
-func ParagraphText(paras []render.Paragraph) string {
-	var b strings.Builder
-	for _, p := range paras {
-		if b.Len() > 0 {
-			b.WriteByte(' ')
-		}
-		b.WriteString(p.Text)
-	}
-	return b.String()
 }
 
 func excerpt(s string, n int) string {
