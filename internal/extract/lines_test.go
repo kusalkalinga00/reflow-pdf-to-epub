@@ -168,3 +168,36 @@ func TestBuildLinesUnionBox(t *testing.T) {
 		t.Errorf("fontSize = %v, want the tallest character (12)", lines[0].fontSize)
 	}
 }
+
+func TestCapHeightIgnoresGlyphsAboveTheBaseline(t *testing.T) {
+	// A closing quote sits entirely above the baseline. Taking the highest
+	// glyph bottom as the baseline made such a line measure about 4pt instead
+	// of 10, which turned most body lines of a real novel into "headings".
+	var chars []*responses.GetPageTextStructuredChar
+	chars = append(chars, run("word", 72, 700, 10)...)
+	chars = append(chars, char("\u201d", 92, 706, 97, 710))
+
+	lines := buildLines(chars)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	if got := lines[0].fontSize; got < 9 || got > 11 {
+		t.Errorf("fontSize = %v, want about 10", got)
+	}
+}
+
+func TestCapHeightIsStableWithDescendersAndQuotes(t *testing.T) {
+	plain := buildLines(run("word", 72, 700, 10))
+	withQuote := buildLines(append(run("word", 72, 700, 10), char("\u201d", 92, 706, 97, 710)))
+	withDescender := buildLines(append(run("word", 72, 700, 10), char("g", 92, 696, 97, 706)))
+
+	base := plain[0].fontSize
+	for name, size := range map[string]float64{
+		"quote":     withQuote[0].fontSize,
+		"descender": withDescender[0].fontSize,
+	} {
+		if diff := size - base; diff > 1 || diff < -1 {
+			t.Errorf("%s: fontSize = %v, want about %v", name, size, base)
+		}
+	}
+}
