@@ -20,5 +20,6 @@ coverage.out
 # Corpus material that must never be published
 /corpus/private/
 
-# Downloaded PDFium SDK
+# Downloaded PDFium SDK and EPUBCheck
 /.pdfium/
+/.epubcheck/
