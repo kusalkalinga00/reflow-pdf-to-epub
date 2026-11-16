@@ -37,11 +37,12 @@ func Render(doc idm.Document, opts Options) (epub.Book, error) {
 		return epub.Book{}, ErrNoText
 	}
 
-	chapters := buildChapters(paras, doc)
+	title := titleOf(doc, opts)
+	chapters := buildChapters(paras, title)
 
 	book := epub.Book{
 		Metadata: epub.Metadata{
-			Title:     titleOf(doc, opts),
+			Title:     title,
 			Authors:   doc.Meta.Authors,
 			Language:  languageOf(doc),
 			Publisher: doc.Meta.Publisher,
@@ -82,9 +83,9 @@ type chapter struct {
 // The fallback is one chapter rather than one per page on purpose: a table of
 // contents listing "Page 1 … Page 300" is worse than no chapters at all, and
 // the page list already provides page-level navigation.
-func buildChapters(paras []Paragraph, doc idm.Document) []chapter {
+func buildChapters(paras []Paragraph, title string) []chapter {
 	if !hasHeadings(paras) {
-		return []chapter{{title: chapterTitle(doc), paras: paras}}
+		return []chapter{{title: title, paras: paras}}
 	}
 
 	top := 6
@@ -115,13 +116,6 @@ func hasHeadings(paras []Paragraph) bool {
 		}
 	}
 	return false
-}
-
-func chapterTitle(doc idm.Document) string {
-	if doc.Meta.Title != "" {
-		return doc.Meta.Title
-	}
-	return "Content"
 }
 
 // ParagraphText joins grouped paragraphs the way a reader reads them: in
