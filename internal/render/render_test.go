@@ -181,6 +181,97 @@ func TestRenderUsesTheOutlineForChapters(t *testing.T) {
 	}
 }
 
+func TestRenderSplitsWithinAPageAtOutlinePositions(t *testing.T) {
+	doc := document([]idm.Block{
+		line("Header text at the top.", 1, 760, 770, 10),
+		line("Section one body.", 1, 650, 660, 10),
+		line("Section two body.", 1, 400, 410, 10),
+	}, 1)
+	doc.Outline = []idm.OutlineEntry{
+		{Title: "Section One", Page: 1, Level: 1, Y: 700},
+		{Title: "Section Two", Page: 1, Level: 1, Y: 450},
+	}
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	want := []string{"Front matter", "Section One", "Section Two"}
+	if got := chapterTitlesOf(book); len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("chapters = %v, want %v", got, want)
+	}
+	if !strings.Contains(book.Chapters[1].Body, "Section one body.") {
+		t.Errorf("first section body = %q", book.Chapters[1].Body)
+	}
+	if !strings.Contains(book.Chapters[2].Body, "Section two body.") {
+		t.Errorf("second section body = %q", book.Chapters[2].Body)
+	}
+}
+
+func TestRenderDescendsToALevelWithStructure(t *testing.T) {
+	doc := document([]idm.Block{
+		line("Part introduction.", 1, 680, 690, 10),
+		line("First section body.", 1, 650, 660, 10),
+		line("Second section body.", 1, 450, 460, 10),
+		line("Third section body.", 1, 300, 310, 10),
+	}, 1)
+	doc.Outline = []idm.OutlineEntry{
+		{Title: "The Whole Document", Page: 1, Level: 1, Y: 780},
+		{Title: "First", Page: 1, Level: 2, Y: 700},
+		{Title: "Second", Page: 1, Level: 2, Y: 500},
+		{Title: "Third", Page: 1, Level: 2, Y: 350},
+	}
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	titles := chapterTitlesOf(book)
+	if len(titles) != 3 {
+		t.Fatalf("chapters = %v, want the three level-2 sections", titles)
+	}
+	if titles[0] != "First" || titles[2] != "Third" {
+		t.Errorf("chapters = %v", titles)
+	}
+}
+
+func TestRenderLocatesBookmarksWithoutPositions(t *testing.T) {
+	// Bookmarks that point at a page with no destination, as most PDF printers
+	// produce. The titles are in the text, so the headings are found by name.
+	doc := document([]idm.Block{
+		line("Summary of the document.", 1, 760, 770, 10),
+		line("Education", 1, 650, 670, 20),
+		line("Some education detail.", 1, 620, 630, 10),
+		line("Experience", 1, 500, 520, 20),
+		line("Some experience detail.", 1, 470, 480, 10),
+	}, 1)
+	doc.Outline = []idm.OutlineEntry{
+		{Title: "Education", Page: 1, Level: 1},
+		{Title: "Experience", Page: 1, Level: 1},
+	}
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	titles := chapterTitlesOf(book)
+	if len(titles) != 3 {
+		t.Fatalf("chapters = %v, want front matter plus two sections", titles)
+	}
+	if titles[1] != "Education" || titles[2] != "Experience" {
+		t.Fatalf("chapters = %v", titles)
+	}
+	if !strings.Contains(book.Chapters[1].Body, "Some education detail.") {
+		t.Errorf("education chapter = %q", book.Chapters[1].Body)
+	}
+	if !strings.Contains(book.Chapters[2].Body, "Some experience detail.") {
+		t.Errorf("experience chapter = %q", book.Chapters[2].Body)
+	}
+}
+
 func TestRenderIgnoresAThinOutline(t *testing.T) {
 	doc := document([]idm.Block{
 		line("Body on page one.", 1, 600, 610, 10),

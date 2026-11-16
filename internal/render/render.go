@@ -11,6 +11,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -119,7 +120,10 @@ func imageExtension(mediaType string) string {
 type chapter struct {
 	title     string
 	startPage int
-	paras     []Paragraph
+	// startY is the top of the chapter within startPage. It is +Inf when the
+	// bookmark has no position, meaning the chapter starts at the page top.
+	startY float64
+	paras  []Paragraph
 }
 
 // buildChapters splits at the highest heading level present, falling back to a
@@ -171,15 +175,25 @@ func chaptersFromOutline(paras []Paragraph, outline []idm.OutlineEntry) []chapte
 
 	chapters := make([]chapter, len(starts))
 	for i, s := range starts {
-		chapters[i] = chapter{title: s.Title, startPage: s.Page}
+		chapters[i] = chapter{title: s.Title, startPage: s.Page, startY: startY(s)}
 	}
 
+	locateUnpositioned(chapters, paras)
+
+	// A paragraph belongs to the last chapter that starts at or before it. The
+	// comparison is by position, not just page, because sections routinely
+	// share a page.
 	var frontMatter []Paragraph
 	for _, p := range paras {
 		index := -1
 		for i := len(chapters) - 1; i >= 0; i-- {
-			if p.Page >= chapters[i].startPage {
+			c := chapters[i]
+			if p.Page > c.startPage {
 				index = i
+			} else if p.Page == c.startPage && p.Box.Y1 <= c.startY+2 {
+				index = i
+			}
+			if index >= 0 {
 				break
 			}
 		}
@@ -208,31 +222,127 @@ func chaptersFromOutline(paras []Paragraph, outline []idm.OutlineEntry) []chapte
 	return out
 }
 
-// outlineStarts returns the top-level entries that point at a page, in page
-// order, dropping duplicates.
+// outlineStarts picks the level of the outline that describes the document's
+// structure.
+//
+// The shallowest level with at least two usable entries wins. A résumé has a
+// single level-1 entry and seven level-2 sections, so using level 1 blindly
+// produced one chapter for a document with a real table of contents.
 func outlineStarts(outline []idm.OutlineEntry) []idm.OutlineEntry {
-	top := 0
-	for _, e := range outline {
-		if e.Page > 0 && (top == 0 || e.Level < top) {
-			top = e.Level
-		}
-	}
-	if top == 0 {
-		return nil
-	}
+	byLevel := map[int][]idm.OutlineEntry{}
+	var levels []int
 
-	var starts []idm.OutlineEntry
-	seen := map[int]bool{}
 	for _, e := range outline {
-		if e.Level != top || e.Page <= 0 || seen[e.Page] {
+		if e.Page <= 0 {
 			continue
 		}
-		seen[e.Page] = true
-		starts = append(starts, e)
+		if _, seen := byLevel[e.Level]; !seen {
+			levels = append(levels, e.Level)
+		}
+		byLevel[e.Level] = append(byLevel[e.Level], e)
+	}
+	sort.Ints(levels)
+
+	for _, level := range levels {
+		if starts := sortAndDedupe(byLevel[level]); len(starts) >= 2 {
+			return starts
+		}
+	}
+	return nil
+}
+
+// sortAndDedupe orders entries by page then top-down, dropping entries that
+// point at the same position.
+func sortAndDedupe(entries []idm.OutlineEntry) []idm.OutlineEntry {
+	sorted := append([]idm.OutlineEntry(nil), entries...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].Page != sorted[j].Page {
+			return sorted[i].Page < sorted[j].Page
+		}
+		return startY(sorted[i]) > startY(sorted[j])
+	})
+
+	// Entries without a position are kept: they are distinct sections that
+	// will be located by title later. Dropping them here collapsed a résumé's
+	// seven sections into one chapter.
+	out := sorted[:0]
+	lastPage := -1
+	lastY := 0.0
+	for _, e := range sorted {
+		y := startY(e)
+		if e.Page == lastPage && y == lastY && !math.IsInf(y, 1) {
+			continue
+		}
+		lastPage, lastY = e.Page, y
+		out = append(out, e)
+	}
+	return out
+}
+
+// locateUnpositioned gives a position to chapters whose bookmark points at a
+// page without a vertical destination.
+//
+// Many producers write /Fit destinations, which carry no y at all — the résumé
+// in the corpus has thirteen bookmarks on two pages and not one position. The
+// bookmark title is still in the text, so the heading is found by name and its
+// position is used instead.
+func locateUnpositioned(chapters []chapter, paras []Paragraph) {
+	prevPage := 0
+	prevY := math.Inf(1)
+
+	for i := range chapters {
+		c := &chapters[i]
+
+		if !math.IsInf(c.startY, 1) {
+			prevPage, prevY = c.startPage, c.startY
+			continue
+		}
+
+		page, y, ok := findTitle(paras, c.title, prevPage, prevY)
+		if !ok {
+			continue
+		}
+		c.startPage, c.startY = page, y
+		prevPage, prevY = page, y
+	}
+}
+
+// findTitle returns the position of the first paragraph at or after the given
+// point whose text matches the bookmark title.
+func findTitle(paras []Paragraph, title string, afterPage int, afterY float64) (int, float64, bool) {
+	want := normalizeTitle(title)
+	if want == "" {
+		return 0, 0, false
 	}
 
-	sort.SliceStable(starts, func(i, j int) bool { return starts[i].Page < starts[j].Page })
-	return starts
+	for _, p := range paras {
+		if p.Page < afterPage {
+			continue
+		}
+		if p.Page == afterPage && p.Box.Y1 > afterY {
+			continue
+		}
+
+		got := normalizeTitle(p.Text)
+		if got == want || strings.HasPrefix(got, want+" ") || strings.HasPrefix(got, want+":") {
+			return p.Page, p.Box.Y1, true
+		}
+	}
+
+	return 0, 0, false
+}
+
+func normalizeTitle(s string) string {
+	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(s))), " ")
+}
+
+// startY is where a chapter begins on its page. A bookmark without a position
+// starts at the top, which sorts first and contains everything on the page.
+func startY(entry idm.OutlineEntry) float64 {
+	if entry.Y <= 0 {
+		return math.Inf(1)
+	}
+	return entry.Y
 }
 
 func hasHeadings(paras []Paragraph) bool {
