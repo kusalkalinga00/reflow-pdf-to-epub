@@ -12,7 +12,8 @@ import (
 
 type config struct {
 	mediaBox func(page int) string
-	lines    []Line
+	pages    [][]Line
+	hasPages bool
 }
 
 // Line is one line of text drawn on the first page.
@@ -34,7 +35,19 @@ func WithMediaBox(fn func(page int) string) Option {
 // WithLines replaces the first page's content with the given lines, each drawn
 // at its own size. It is what makes heading detection testable end to end.
 func WithLines(lines ...Line) Option {
-	return func(c *config) { c.lines = lines }
+	return func(c *config) {
+		c.pages = [][]Line{lines}
+		c.hasPages = true
+	}
+}
+
+// WithPages sets the content of every page. Pages beyond the supplied slices
+// are left blank.
+func WithPages(pages ...[]Line) Option {
+	return func(c *config) {
+		c.pages = pages
+		c.hasPages = true
+	}
 }
 
 // Build returns a PDF with the given number of pages, each carrying a single
@@ -68,8 +81,11 @@ func Build(pages int, opts ...Option) []byte {
 		kids = append(kids, fmt.Sprintf("%d 0 R", pageNum))
 
 		stream := fmt.Sprintf("BT /F1 24 Tf 72 720 Td (Page %d) Tj ET", i+1)
-		if i == 0 && len(cfg.lines) > 0 {
-			stream = contentStream(cfg.lines)
+		if cfg.hasPages {
+			stream = ""
+			if i < len(cfg.pages) {
+				stream = contentStream(cfg.pages[i])
+			}
 		}
 		objects[pageNum] = fmt.Sprintf(
 			"<< /Type /Page /Parent %d 0 R /MediaBox %s /Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>",
@@ -80,7 +96,9 @@ func Build(pages int, opts ...Option) []byte {
 
 	objects[catalog] = fmt.Sprintf("<< /Type /Catalog /Pages %d 0 R >>", pagesObj)
 	objects[pagesObj] = fmt.Sprintf("<< /Type /Pages /Kids [%s] /Count %d >>", strings.Join(kids, " "), pages)
-	objects[font] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+	// WinAnsiEncoding is declared explicitly: without it, text extraction has to
+	// guess at the character mapping and gets some punctuation wrong.
+	objects[font] = "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"
 	objects[info] = "<< /Title (Test Document) /Author (Test Author) /Producer (testpdf) >>"
 
 	maxObj := firstPage + 2*pages

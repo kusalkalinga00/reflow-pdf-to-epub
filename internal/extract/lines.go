@@ -193,7 +193,35 @@ func joinPieces(pieces []piece) line {
 		return line{}
 	}
 
-	return line{text: text, box: box, fontSize: box.Height()}
+	return line{text: text, box: box, fontSize: capHeight(pieces, box)}
+}
+
+// capHeight estimates the text size from the line's ascender-to-baseline
+// distance.
+//
+// The bounding box height is not usable as a size: a line containing a
+// descender ("page", "gently") is roughly 30% taller than the same line without
+// one, which is enough to make heading detection classify body text as a
+// heading. The baseline is the highest glyph bottom in the line; the cap height
+// is the tallest glyph top above it. Both are stable across lines set in the
+// same font.
+func capHeight(pieces []piece, box idm.Rect) float64 {
+	baseline := math.Inf(-1)
+	top := math.Inf(-1)
+
+	for _, p := range pieces {
+		if y := p.box.Y0; y > baseline {
+			baseline = y
+		}
+		if y := p.box.Y1; y > top {
+			top = y
+		}
+	}
+
+	if cap := top - baseline; cap > 0 {
+		return cap
+	}
+	return box.Height()
 }
 
 // appendLine adds a non-empty line. Runs that contain only spaces produce no
