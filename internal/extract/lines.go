@@ -126,7 +126,9 @@ func clusterByBaseline(pieces []piece) []line {
 		last := cur[len(cur)-1]
 		height := math.Max(last.box.Height(), p.box.Height())
 
-		sameBaseline := math.Abs(p.box.Y0-last.box.Y0) <= 0.5*height
+		// The window is generous because a closing quote sits most of a line
+		// height above the baseline while a descender sits below it.
+		sameBaseline := math.Abs(p.box.Y0-last.box.Y0) <= 0.8*height
 		smallGap := height <= 0 || p.box.HorizontalGap(last.box) <= 2*height
 
 		if sameBaseline && smallGap {
@@ -207,13 +209,13 @@ func joinPieces(pieces []piece) line {
 // is the tallest glyph top above it. Both are stable across lines set in the
 // same font.
 func capHeight(pieces []piece, box idm.Rect) float64 {
-	baseline := math.Inf(-1)
-	top := math.Inf(-1)
+	baseline, ok := baselineOf(pieces)
+	if !ok {
+		return box.Height()
+	}
 
+	top := math.Inf(-1)
 	for _, p := range pieces {
-		if y := p.box.Y0; y > baseline {
-			baseline = y
-		}
 		if y := p.box.Y1; y > top {
 			top = y
 		}
@@ -223,6 +225,36 @@ func capHeight(pieces []piece, box idm.Rect) float64 {
 		return cap
 	}
 	return box.Height()
+}
+
+// baselineOf finds the line's baseline as the most common glyph bottom.
+//
+// It cannot be the lowest bottom: a line ending in a closing quote, an
+// apostrophe, or a superscript has glyphs whose boxes sit entirely above the
+// baseline, and taking the maximum makes those lines look like 4pt text. In a
+// 250-page novel that turned most body lines into "headings".
+func baselineOf(pieces []piece) (float64, bool) {
+	const bucket = 0.5 // points
+
+	counts := make(map[float64]int, len(pieces))
+	for _, p := range pieces {
+		if p.box.Height() <= 0 {
+			continue
+		}
+		counts[math.Round(p.box.Y0/bucket)*bucket]++
+	}
+	if len(counts) == 0 {
+		return 0, false
+	}
+
+	var best float64
+	bestCount := 0
+	for y, n := range counts {
+		if n > bestCount || (n == bestCount && y < best) {
+			best, bestCount = y, n
+		}
+	}
+	return best, true
 }
 
 // appendLine adds a non-empty line. Runs that contain only spaces produce no
