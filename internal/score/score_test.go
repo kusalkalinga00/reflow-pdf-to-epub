@@ -98,7 +98,7 @@ func TestGenericChapterTitlesCostPoints(t *testing.T) {
 	report := score.Evaluate(
 		document(2, 0.3, block(idm.KindParagraph, 1)),
 		paragraphs(),
-		[]string{"Front matter", "Chapter One"},
+		[]string{"Content", "Chapter One"},
 	)
 
 	if report.Signals.GenericChapters != 1 {
@@ -207,6 +207,26 @@ func TestOCRedPagesAreReported(t *testing.T) {
 	}
 	if !hasIssue(report, "OCR_USED") {
 		t.Errorf("issues = %v, want OCR_USED", report.Issues)
+	}
+}
+
+func TestOutlineGivesStructureWithoutHeadings(t *testing.T) {
+	doc := document(4, 0.3, block(idm.KindParagraph, 1))
+	doc.Outline = []idm.OutlineEntry{
+		{Title: "One", Page: 1, Level: 1},
+		{Title: "Two", Page: 3, Level: 1},
+	}
+
+	report := score.Evaluate(doc, []render.Paragraph{{Kind: idm.KindParagraph, Text: "Body."}}, []string{"One", "Two"})
+
+	if report.Signals.OutlineEntries != 2 {
+		t.Errorf("outline entries = %d, want 2", report.Signals.OutlineEntries)
+	}
+	if report.Tier != score.TierStructured {
+		t.Errorf("tier = %q, want T1: an outline is structure", report.Tier)
+	}
+	if !hasIssue(report, "OUTLINE_USED") {
+		t.Errorf("issues = %v, want OUTLINE_USED", report.Issues)
 	}
 }
 

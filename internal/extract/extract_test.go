@@ -58,6 +58,47 @@ func TestExtractRecoversText(t *testing.T) {
 	}
 }
 
+func TestExtractReadsTheOutline(t *testing.T) {
+	pdf := testpdf.Build(3, testpdf.WithOutline(
+		testpdf.Bookmark{Title: "Chapter One", Page: 1},
+		testpdf.Bookmark{Title: "Chapter Two", Page: 3},
+	))
+
+	doc, err := extractBytes(t, newExtractor(t, extract.Options{}), pdf)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+
+	if len(doc.Outline) != 2 {
+		t.Fatalf("outline has %d entries, want 2: %+v", len(doc.Outline), doc.Outline)
+	}
+	if doc.Outline[0].Title != "Chapter One" || doc.Outline[0].Page != 1 {
+		t.Errorf("entry 0 = %+v", doc.Outline[0])
+	}
+	if doc.Outline[1].Title != "Chapter Two" || doc.Outline[1].Page != 3 {
+		t.Errorf("entry 1 = %+v", doc.Outline[1])
+	}
+	for _, e := range doc.Outline {
+		if e.Level != 1 {
+			t.Errorf("%q has level %d, want 1", e.Title, e.Level)
+		}
+	}
+
+	if err := doc.Validate(); err != nil {
+		t.Errorf("document with an outline is invalid: %v", err)
+	}
+}
+
+func TestExtractWithoutOutline(t *testing.T) {
+	doc, err := extractBytes(t, newExtractor(t, extract.Options{}), testpdf.Build(1))
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if len(doc.Outline) != 0 {
+		t.Errorf("outline = %+v, want none", doc.Outline)
+	}
+}
+
 func TestExtractPageGeometry(t *testing.T) {
 	doc, err := extractBytes(t, newExtractor(t, extract.Options{}), testpdf.Build(1))
 	if err != nil {
