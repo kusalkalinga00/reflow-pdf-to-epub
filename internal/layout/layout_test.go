@@ -217,6 +217,32 @@ func TestApplyKeepsPagesOrderedAndValid(t *testing.T) {
 	}
 }
 
+// TestApplyPreservesEveryFieldExceptBlocks walks the struct so a field added
+// later is covered without anyone remembering to update this test.
+func TestApplyPreservesEveryFieldExceptBlocks(t *testing.T) {
+	doc := document(1, block("body", 1, 72, 600, 520, 612))
+	doc.Meta = idm.Metadata{
+		Title: "The Long Road", Authors: []string{"A. Author"}, Language: "en",
+		Publisher: "Tool Factory", Subject: "Subject", SourceHash: "abc",
+		SourceName: "book.pdf",
+	}
+	doc.Outline = []idm.OutlineEntry{{Title: "One", Page: 1, Level: 1}}
+
+	out := Apply(doc)
+
+	before := reflect.ValueOf(doc)
+	after := reflect.ValueOf(out)
+	for i := 0; i < before.NumField(); i++ {
+		name := before.Type().Field(i).Name
+		if name == "Blocks" {
+			continue
+		}
+		if !reflect.DeepEqual(before.Field(i).Interface(), after.Field(i).Interface()) {
+			t.Errorf("Apply changed or dropped %q", name)
+		}
+	}
+}
+
 func TestApplyKeepsTheOutline(t *testing.T) {
 	doc := document(2,
 		block("p1", 1, 72, 600, 520, 612),

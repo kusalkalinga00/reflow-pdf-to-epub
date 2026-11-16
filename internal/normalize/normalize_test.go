@@ -1,6 +1,7 @@
 package normalize
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
@@ -173,6 +174,33 @@ func TestApplyNormalizesEveryBlock(t *testing.T) {
 
 	if doc.Blocks[0].Text != "ef\ufb01cient  engine" {
 		t.Error("Apply modified the caller's document")
+	}
+}
+
+func TestApplyPreservesEveryFieldExceptBlocks(t *testing.T) {
+	doc := idm.Document{
+		Meta: idm.Metadata{
+			Title: "The Long Road", Authors: []string{"A. Author"}, Language: "en",
+			Publisher: "Tool Factory", Subject: "Subject", SourceHash: "abc",
+			SourceName: "book.pdf",
+		},
+		Pages:   []idm.Page{{Number: 1, Width: 595, Height: 842, Provenance: idm.ProvenanceDigital, TextCoverage: 0.4}},
+		Blocks:  []idm.Block{{Kind: idm.KindParagraph, Text: "Body.", Page: 1, BBox: idm.Rect{X0: 72, Y0: 600, X1: 500, Y1: 612}, Confidence: 1, FontSize: 12}},
+		Outline: []idm.OutlineEntry{{Title: "One", Page: 1, Level: 1}},
+	}
+
+	out := Apply(doc)
+
+	before := reflect.ValueOf(doc)
+	after := reflect.ValueOf(out)
+	for i := 0; i < before.NumField(); i++ {
+		name := before.Type().Field(i).Name
+		if name == "Blocks" {
+			continue
+		}
+		if !reflect.DeepEqual(before.Field(i).Interface(), after.Field(i).Interface()) {
+			t.Errorf("Apply changed or dropped %q", name)
+		}
 	}
 }
 

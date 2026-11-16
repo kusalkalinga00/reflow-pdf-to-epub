@@ -139,6 +139,17 @@ type Document struct {
 	Outline []OutlineEntry `json:"outline,omitempty"`
 }
 
+// WithBlocks returns a copy of d with its blocks replaced and every other field
+// carried over.
+//
+// Pipeline stages that reorder or rewrite blocks must use this rather than
+// building a Document field by field: a hand-built document silently drops any
+// field added later, which is how the outline was lost once already.
+func (d Document) WithBlocks(blocks []Block) Document {
+	d.Blocks = blocks
+	return d
+}
+
 // PageCount returns the number of pages.
 func (d Document) PageCount() int { return len(d.Pages) }
 
