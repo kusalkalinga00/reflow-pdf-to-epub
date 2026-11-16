@@ -7,8 +7,10 @@
 package extract
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"image/png"
 	"io"
 	"strings"
 	"time"
@@ -19,6 +21,7 @@ import (
 	"github.com/klippa-app/go-pdfium/single_threaded"
 
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ocr"
 )
 
 // Extractor converts a PDF into an idm.Document.
@@ -35,6 +38,11 @@ type Options struct {
 	DefaultLanguage string
 	// Timeout bounds a single PDFium call, not the whole document.
 	Timeout time.Duration
+	// OCR reads pages that have no text layer. Nil disables it, and the page is
+	// left empty as before.
+	OCR ocr.Recognizer
+	// OCRDPI is the resolution pages are rendered at for OCR. Zero means 300.
+	OCRDPI int
 }
 
 // PDFium extracts text with the PDFium engine.
@@ -56,6 +64,9 @@ func NewPDFium(opts Options) (*PDFium, error) {
 	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = 10 * time.Second
+	}
+	if opts.OCRDPI <= 0 {
+		opts.OCRDPI = 300
 	}
 
 	pool := single_threaded.Init(single_threaded.Config{})
@@ -106,7 +117,7 @@ func (e *PDFium) Extract(ctx context.Context, src io.ReaderAt, size int64) (idm.
 			return out, err
 		}
 
-		page, blocks, err := e.extractPage(doc.Document, i)
+		page, blocks, err := e.extractPage(ctx, doc.Document, i)
 		if err != nil {
 			return out, fmt.Errorf("page %d: %w", i+1, err)
 		}
@@ -120,7 +131,7 @@ func (e *PDFium) Extract(ctx context.Context, src io.ReaderAt, size int64) (idm.
 	return out, nil
 }
 
-func (e *PDFium) extractPage(doc references.FPDF_DOCUMENT, index int) (idm.Page, []idm.Block, error) {
+func (e *PDFium) extractPage(ctx context.Context, doc references.FPDF_DOCUMENT, index int) (idm.Page, []idm.Block, error) {
 	page := requests.Page{ByIndex: &requests.PageByIndex{Document: doc, Index: index}}
 
 	size, err := e.instance.GetPageSize(&requests.GetPageSize{Page: page})
@@ -142,17 +153,87 @@ func (e *PDFium) extractPage(doc references.FPDF_DOCUMENT, index int) (idm.Page,
 	}
 
 	lines := buildLines(text.Chars)
+	provenance := idm.ProvenanceDigital
+
+	// A page with no text layer is either blank or a scan. OCR is the only way
+	// to tell, and the only way to recover it.
+	if len(lines) == 0 && e.opts.OCR != nil {
+		recognized, err := e.ocrPage(ctx, page, size.Width, size.Height)
+		if err != nil {
+			return idm.Page{}, nil, fmt.Errorf("ocr: %w", err)
+		}
+		if len(recognized) > 0 {
+			lines = recognized
+			provenance = idm.ProvenanceOCR
+		}
+	}
 
 	out := idm.Page{
 		Number:       index + 1,
 		Width:        size.Width,
 		Height:       size.Height,
 		Rotation:     int(rotation.PageRotation) * 90,
-		Provenance:   idm.ProvenanceDigital,
+		Provenance:   provenance,
 		TextCoverage: coverage(lines, size.Width, size.Height),
 	}
 
 	return out, blocksFromLines(lines, index+1), nil
+}
+
+// ocrPage renders the page and converts the recognized line boxes from image
+// pixels (origin top left) to PDF points (origin bottom left).
+func (e *PDFium) ocrPage(ctx context.Context, page requests.Page, width, height float64) ([]line, error) {
+	rendered, err := e.instance.RenderPageInDPI(&requests.RenderPageInDPI{
+		Page: page,
+		DPI:  e.opts.OCRDPI,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("render page: %w", err)
+	}
+	defer rendered.Cleanup()
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, rendered.Result.RenderedImage); err != nil {
+		return nil, fmt.Errorf("encode page image: %w", err)
+	}
+
+	recognized, err := e.opts.OCR.Recognize(ctx, buf.Bytes())
+	if err != nil {
+		return nil, err
+	}
+
+	imgWidth := float64(rendered.Result.Width)
+	imgHeight := float64(rendered.Result.Height)
+	if imgWidth <= 0 || imgHeight <= 0 {
+		return nil, fmt.Errorf("render page: empty image")
+	}
+
+	scaleX := width / imgWidth
+	scaleY := height / imgHeight
+
+	lines := make([]line, 0, len(recognized))
+	for _, l := range recognized {
+		if strings.TrimSpace(l.Text) == "" {
+			continue
+		}
+		box := idm.Rect{
+			X0: l.Left * scaleX,
+			Y0: height - l.Bottom*scaleY,
+			X1: l.Right * scaleX,
+			Y1: height - l.Top*scaleY,
+		}
+		if !box.Valid() || box.Area() <= 0 {
+			continue
+		}
+		lines = append(lines, line{
+			text:       l.Text,
+			box:        box,
+			fontSize:   box.Height(),
+			confidence: l.Confidence,
+		})
+	}
+
+	return lines, nil
 }
 
 // metadata reads the document information dictionary and the catalog language.
@@ -201,7 +282,7 @@ func blocksFromLines(lines []line, page int) []idm.Block {
 			Text:       l.text,
 			Page:       page,
 			BBox:       l.box,
-			Confidence: 1,
+			Confidence: l.confidence,
 			FontSize:   l.fontSize,
 		})
 	}
