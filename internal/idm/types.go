@@ -131,12 +131,25 @@ type OutlineEntry struct {
 	Level int    `json:"level"`
 }
 
+// Features records structure the source declares but the conversion cannot
+// represent yet. It exists so the quality report can say "a table was here"
+// instead of silently flattening it.
+type Features struct {
+	// Tagged is true when the PDF carries a structure tree.
+	Tagged bool `json:"tagged,omitempty"`
+	// Tables, Figures and HeadingElements count structure elements.
+	Tables          int `json:"tables,omitempty"`
+	Figures         int `json:"figures,omitempty"`
+	HeadingElements int `json:"headingElements,omitempty"`
+}
+
 // Document is a whole source document.
 type Document struct {
-	Meta    Metadata       `json:"meta"`
-	Pages   []Page         `json:"pages"`
-	Blocks  []Block        `json:"blocks"`
-	Outline []OutlineEntry `json:"outline,omitempty"`
+	Meta     Metadata       `json:"meta"`
+	Pages    []Page         `json:"pages"`
+	Blocks   []Block        `json:"blocks"`
+	Outline  []OutlineEntry `json:"outline,omitempty"`
+	Features Features       `json:"features,omitempty"`
 }
 
 // WithBlocks returns a copy of d with its blocks replaced and every other field
