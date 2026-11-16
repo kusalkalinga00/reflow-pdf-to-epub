@@ -72,6 +72,26 @@ func WithImage(jpeg []byte, pixelWidth, pixelHeight int, displayWidth, displayHe
 	}
 }
 
+// WithCMYKImage draws a four-channel image stored with /FlateDecode, which is
+// how print-oriented PDFs store photographs.
+func WithCMYKImage(cmyk []byte, pixelWidth, pixelHeight int, displayWidth, displayHeight float64) Option {
+	return func(c *config) {
+		var compressed bytes.Buffer
+		zw := zlib.NewWriter(&compressed)
+		zw.Write(cmyk)
+		zw.Close()
+
+		c.image = compressed.Bytes()
+		c.imageW = pixelWidth
+		c.imageH = pixelHeight
+		c.imageDisplayW = displayWidth
+		c.imageDisplayH = displayHeight
+		c.imageFilter = "FlateDecode"
+		c.imageColorspace = "DeviceCMYK"
+		c.imageBPC = 8
+	}
+}
+
 // WithFlateImage draws an RGB image stored with /FlateDecode, which is what a
 // PNG embedded in a PDF looks like once its samples are compressed.
 func WithFlateImage(rgb []byte, pixelWidth, pixelHeight int, displayWidth, displayHeight float64) Option {
