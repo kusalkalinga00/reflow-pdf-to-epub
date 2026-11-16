@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"image"
 	"image/png"
 	"io"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/klippa-app/go-pdfium/references"
 	"github.com/klippa-app/go-pdfium/requests"
 	"github.com/klippa-app/go-pdfium/single_threaded"
+	"github.com/klippa-app/go-pdfium/structs"
 
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ocr"
@@ -412,22 +414,6 @@ func (e *PDFium) images(doc references.FPDF_DOCUMENT, index int) ([]idm.Block, i
 			continue
 		}
 
-		if filter, err := e.instance.FPDFImageObj_GetImageFilter(&requests.FPDFImageObj_GetImageFilter{
-			ImageObject: obj.PageObject,
-			Index:       0,
-		}); err != nil || filter.ImageFilter != "DCTDecode" {
-			skipped++
-			continue
-		}
-
-		raw, err := e.instance.FPDFImageObj_GetImageDataRaw(&requests.FPDFImageObj_GetImageDataRaw{
-			ImageObject: obj.PageObject,
-		})
-		if err != nil || len(raw.Data) == 0 {
-			skipped++
-			continue
-		}
-
 		bounds, err := e.instance.FPDFPageObj_GetBounds(&requests.FPDFPageObj_GetBounds{
 			PageObject: obj.PageObject,
 		})
@@ -443,21 +429,102 @@ func (e *PDFium) images(doc references.FPDF_DOCUMENT, index int) ([]idm.Block, i
 			continue
 		}
 
+		image, ok := e.imageObject(obj.PageObject, meta.ImageMetadata)
+		if !ok {
+			skipped++
+			continue
+		}
+
 		blocks = append(blocks, idm.Block{
 			Kind:       idm.KindFigure,
 			Page:       index + 1,
 			BBox:       box,
 			Confidence: 1,
-			Image: &idm.Image{
-				Data:        raw.Data,
-				MediaType:   "image/jpeg",
-				PixelWidth:  int(meta.ImageMetadata.Width),
-				PixelHeight: int(meta.ImageMetadata.Height),
-			},
+			Image:      image,
 		})
 	}
 
 	return blocks, skipped
+}
+
+// imageObject returns the figure image, preferring the original JPEG bytes and
+// falling back to decoding the samples into a PNG.
+func (e *PDFium) imageObject(obj references.FPDF_PAGEOBJECT, meta structs.FPDF_IMAGEOBJ_METADATA) (*idm.Image, bool) {
+	if filter, err := e.instance.FPDFImageObj_GetImageFilter(&requests.FPDFImageObj_GetImageFilter{
+		ImageObject: obj,
+		Index:       0,
+	}); err == nil && filter.ImageFilter == "DCTDecode" {
+		// Re-embedding the original JPEG keeps the full quality and costs no
+		// re-encode.
+		if raw, err := e.instance.FPDFImageObj_GetImageDataRaw(&requests.FPDFImageObj_GetImageDataRaw{
+			ImageObject: obj,
+		}); err == nil && len(raw.Data) > 0 {
+			return &idm.Image{
+				Data:        raw.Data,
+				MediaType:   "image/jpeg",
+				PixelWidth:  int(meta.Width),
+				PixelHeight: int(meta.Height),
+			}, true
+		}
+	}
+
+	decoded, err := e.instance.FPDFImageObj_GetImageDataDecoded(&requests.FPDFImageObj_GetImageDataDecoded{
+		ImageObject: obj,
+	})
+	if err != nil {
+		return nil, false
+	}
+
+	img := samplesToImage(decoded.Data, int(meta.Width), int(meta.Height), meta.Colorspace, int(meta.BitsPerPixel))
+	if img == nil {
+		return nil, false
+	}
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, false
+	}
+
+	return &idm.Image{
+		Data:        buf.Bytes(),
+		MediaType:   "image/png",
+		PixelWidth:  int(meta.Width),
+		PixelHeight: int(meta.Height),
+	}, true
+}
+
+// samplesToImage turns decoded PDF samples into a Go image for the colour
+// spaces and depths we can represent exactly. Anything else returns nil and is
+// reported as skipped rather than guessed at.
+func samplesToImage(data []byte, width, height int, space enums.FPDF_COLORSPACE, bitsPerPixel int) image.Image {
+	if width <= 0 || height <= 0 {
+		return nil
+	}
+
+	switch {
+	case (space == enums.FPDF_COLORSPACE_DEVICERGB || space == enums.FPDF_COLORSPACE_CALRGB) && bitsPerPixel == 24:
+		if len(data) < width*height*3 {
+			return nil
+		}
+		img := image.NewRGBA(image.Rect(0, 0, width, height))
+		for i := 0; i < width*height; i++ {
+			img.Pix[i*4+0] = data[i*3+0]
+			img.Pix[i*4+1] = data[i*3+1]
+			img.Pix[i*4+2] = data[i*3+2]
+			img.Pix[i*4+3] = 0xff
+		}
+		return img
+
+	case (space == enums.FPDF_COLORSPACE_DEVICEGRAY || space == enums.FPDF_COLORSPACE_CALGRAY) && bitsPerPixel == 8:
+		if len(data) < width*height {
+			return nil
+		}
+		img := image.NewGray(image.Rect(0, 0, width, height))
+		copy(img.Pix, data[:width*height])
+		return img
+	}
+
+	return nil
 }
 
 // ocrPage renders the page and converts the recognized line boxes from image
