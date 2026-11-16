@@ -21,6 +21,8 @@ type Paragraph struct {
 	Page     int
 	Box      idm.Rect
 	FontSize float64
+	// Image is set for figures.
+	Image *idm.Image
 }
 
 // GroupParagraphs merges line blocks into paragraphs and classifies headings.
@@ -36,6 +38,13 @@ func GroupParagraphs(blocks []idm.Block) []Paragraph {
 		if b.Kind.IsFurniture() {
 			continue
 		}
+		if b.Kind == idm.KindFigure && b.Image != nil {
+			out = append(out, Paragraph{
+				Kind: idm.KindFigure, Page: b.Page, Box: b.BBox, Image: b.Image,
+			})
+			continue
+		}
+
 		if text := strings.TrimSpace(b.Text); text == "" {
 			continue
 		}
@@ -60,7 +69,7 @@ func GroupParagraphs(blocks []idm.Block) []Paragraph {
 
 // shouldMerge reports whether next continues the paragraph that prev ends.
 func shouldMerge(prev Paragraph, next idm.Block) bool {
-	if next.Kind != idm.KindParagraph || prev.Page != next.Page {
+	if prev.Kind != idm.KindParagraph || next.Kind != idm.KindParagraph || prev.Page != next.Page {
 		return false
 	}
 	if prev.FontSize <= 0 || next.FontSize <= 0 {
