@@ -6,20 +6,24 @@ package testpdf
 
 import (
 	"bytes"
+	"compress/zlib"
 	"fmt"
 	"strings"
 )
 
 type config struct {
-	mediaBox      func(page int) string
-	pages         [][]Line
-	hasPages      bool
-	outline       []Bookmark
-	image         []byte
-	imageW        int
-	imageH        int
-	imageDisplayW float64
-	imageDisplayH float64
+	mediaBox        func(page int) string
+	pages           [][]Line
+	hasPages        bool
+	outline         []Bookmark
+	image           []byte
+	imageW          int
+	imageH          int
+	imageDisplayW   float64
+	imageDisplayH   float64
+	imageFilter     string
+	imageColorspace string
+	imageBPC        int
 }
 
 // Bookmark is one entry in the PDF outline, pointing at a 1-based page.
@@ -62,6 +66,29 @@ func WithImage(jpeg []byte, pixelWidth, pixelHeight int, displayWidth, displayHe
 		c.imageH = pixelHeight
 		c.imageDisplayW = displayWidth
 		c.imageDisplayH = displayHeight
+		c.imageFilter = "DCTDecode"
+		c.imageColorspace = "DeviceRGB"
+		c.imageBPC = 8
+	}
+}
+
+// WithFlateImage draws an RGB image stored with /FlateDecode, which is what a
+// PNG embedded in a PDF looks like once its samples are compressed.
+func WithFlateImage(rgb []byte, pixelWidth, pixelHeight int, displayWidth, displayHeight float64) Option {
+	return func(c *config) {
+		var compressed bytes.Buffer
+		zw := zlib.NewWriter(&compressed)
+		zw.Write(rgb)
+		zw.Close()
+
+		c.image = compressed.Bytes()
+		c.imageW = pixelWidth
+		c.imageH = pixelHeight
+		c.imageDisplayW = displayWidth
+		c.imageDisplayH = displayHeight
+		c.imageFilter = "FlateDecode"
+		c.imageColorspace = "DeviceRGB"
+		c.imageBPC = 8
 	}
 }
 
@@ -144,8 +171,9 @@ func Build(pages int, opts ...Option) []byte {
 
 	if len(cfg.image) > 0 {
 		objects[maxObj+1] = fmt.Sprintf(
-			"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length %d >>\nstream\n%s\nendstream",
-			cfg.imageW, cfg.imageH, len(cfg.image), string(cfg.image),
+			"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /%s /BitsPerComponent %d /Filter /%s /Length %d >>\nstream\n%s\nendstream",
+			cfg.imageW, cfg.imageH, cfg.imageColorspace, cfg.imageBPC,
+			cfg.imageFilter, len(cfg.image), string(cfg.image),
 		)
 		maxObj++
 	}
