@@ -274,6 +274,45 @@ func TestUnsupportedStructureIsCapped(t *testing.T) {
 	}
 }
 
+func figureBlock() idm.Block {
+	return idm.Block{
+		Kind: idm.KindFigure, Page: 1, Confidence: 1,
+		BBox:  idm.Rect{X0: 72, Y0: 400, X1: 300, Y1: 600},
+		Image: &idm.Image{Data: []byte("jpeg"), MediaType: "image/jpeg"},
+	}
+}
+
+func TestEmbeddedFiguresOffsetDeclaredOnes(t *testing.T) {
+	doc := document(2, 0.3, block(idm.KindParagraph, 1), figureBlock())
+	doc.Features.Figures = 1
+
+	report := score.Evaluate(doc, paragraphs(), []string{"Chapter One"})
+
+	if report.Signals.FiguresEmbedded != 1 {
+		t.Fatalf("embedded = %d, want 1", report.Signals.FiguresEmbedded)
+	}
+	if report.Score != 100 {
+		t.Errorf("score = %d, want 100: the figure was recovered", report.Score)
+	}
+	if hasIssue(report, "FIGURES_DROPPED") {
+		t.Errorf("issues = %v, want no FIGURES_DROPPED", report.Issues)
+	}
+}
+
+func TestSkippedImagesCostPoints(t *testing.T) {
+	doc := document(2, 0.3, block(idm.KindParagraph, 1))
+	doc.Features.ImagesSkipped = 2
+
+	report := score.Evaluate(doc, paragraphs(), []string{"Chapter One"})
+
+	if report.Score != 96 {
+		t.Errorf("score = %d, want 96", report.Score)
+	}
+	if !hasIssue(report, "IMAGES_SKIPPED") {
+		t.Errorf("issues = %v, want IMAGES_SKIPPED", report.Issues)
+	}
+}
+
 func TestSummaryMatchesTier(t *testing.T) {
 	structured := score.Evaluate(document(1, 0.3, block(idm.KindParagraph, 1)), paragraphs(), []string{"Chapter One"})
 	if !strings.Contains(structured.Summary, "Structured") {

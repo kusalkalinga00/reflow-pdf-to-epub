@@ -481,6 +481,70 @@ func TestCoverIsPackaged(t *testing.T) {
 	}
 }
 
+func TestImagesArePackaged(t *testing.T) {
+	book := sampleBook()
+	book.Images = []Image{{
+		Name: "fig-001.jpg", Data: []byte("jpeg-bytes"), MediaType: "image/jpeg",
+	}}
+
+	a := openArchive(t, mustWrite(t, book))
+	a.mustGet(t, "OEBPS/images/fig-001.jpg")
+
+	doc := mustParseXML(t, a.mustGet(t, "OEBPS/package.opf"))
+	var found *etree.Element
+	for _, item := range findAll(firstOf(t, doc, "manifest"), "item") {
+		if item.SelectAttrValue("href", "") == "images/fig-001.jpg" {
+			found = item
+		}
+	}
+	if found == nil {
+		t.Fatal("image is not in the manifest")
+	}
+	if got := found.SelectAttrValue("media-type", ""); got != "image/jpeg" {
+		t.Errorf("media type = %q", got)
+	}
+}
+
+func TestInvalidImagesAreRejected(t *testing.T) {
+	tests := []struct {
+		name  string
+		image Image
+		want  string
+	}{
+		{"no data", Image{Name: "a.jpg", MediaType: "image/jpeg"}, "needs a name and data"},
+		{"no name", Image{Data: []byte("x"), MediaType: "image/jpeg"}, "needs a name and data"},
+		{"path in name", Image{Name: "../x.jpg", Data: []byte("x"), MediaType: "image/jpeg"}, "must be a file name"},
+		{"unknown type", Image{Name: "a.tiff", Data: []byte("x"), MediaType: "image/tiff"}, "unsupported media type"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			book := sampleBook()
+			book.Images = []Image{tt.image}
+
+			_, err := WriteBytes(book)
+			if err == nil {
+				t.Fatal("WriteBytes() = nil error, want a rejection")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("error = %q, want it to mention %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestDuplicateImageNamesAreRejected(t *testing.T) {
+	book := sampleBook()
+	book.Images = []Image{
+		{Name: "fig-001.jpg", Data: []byte("a"), MediaType: "image/jpeg"},
+		{Name: "fig-001.jpg", Data: []byte("b"), MediaType: "image/jpeg"},
+	}
+
+	if _, err := WriteBytes(book); err == nil {
+		t.Fatal("duplicate image names were accepted")
+	}
+}
+
 func TestCoverMediaTypeIsRequiredToBeKnown(t *testing.T) {
 	book := sampleBook()
 	book.Cover = &Cover{Data: []byte("%PDF-1.7"), MediaType: "application/pdf"}

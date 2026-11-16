@@ -3,6 +3,10 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/jpeg"
 	"io"
 	"os"
 	"path/filepath"
@@ -91,6 +95,41 @@ func TestConvertDefaultsToInputName(t *testing.T) {
 	out := filepath.Join(dir, "book.epub")
 	if _, err := os.Stat(out); err != nil {
 		t.Fatalf("expected output at %s: %v", out, err)
+	}
+}
+
+func TestConvertEmbedsFigures(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 120, 120))
+	draw.Draw(img, img.Bounds(), &image.Uniform{C: color.RGBA{R: 10, G: 120, B: 200, A: 255}}, image.Point{}, draw.Src)
+	var jpegData bytes.Buffer
+	if err := jpeg.Encode(&jpegData, img, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	in := filepath.Join(dir, "picture.pdf")
+	if err := os.WriteFile(in, testpdf.Build(1, testpdf.WithImage(jpegData.Bytes(), 120, 120, 200, 200)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "picture.epub")
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"convert", "-q", "-o", out, in}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	zr, err := zip.OpenReader(out)
+	if err != nil {
+		t.Fatalf("open output: %v", err)
+	}
+	defer zr.Close()
+
+	names := map[string]bool{}
+	for _, f := range zr.File {
+		names[f.Name] = true
+	}
+	if !names["OEBPS/images/fig-001.jpg"] {
+		t.Fatalf("archive has no figure; entries: %v", names)
 	}
 }
 
