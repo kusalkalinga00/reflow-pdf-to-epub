@@ -30,6 +30,8 @@ type config struct {
 type Bookmark struct {
 	Title string
 	Page  int
+	// Y positions the destination vertically on the page. Zero means the top.
+	Y float64
 }
 
 // Line is one line of text drawn on the first page.
@@ -185,8 +187,12 @@ func Build(pages int, opts ...Option) []byte {
 		for i, mark := range cfg.outline {
 			num := outlinesNum + 1 + i
 			pageRef := firstPage + 2*(mark.Page-1)
-			body := fmt.Sprintf("<< /Title (%s) /Parent %d 0 R /Dest [%d 0 R /Fit]",
-				escapeText(mark.Title), outlinesNum, pageRef)
+			dest := fmt.Sprintf("[%d 0 R /Fit]", pageRef)
+			if mark.Y > 0 {
+				dest = fmt.Sprintf("[%d 0 R /XYZ 0 %.2f 0]", pageRef, mark.Y)
+			}
+			body := fmt.Sprintf("<< /Title (%s) /Parent %d 0 R /Dest %s",
+				escapeText(mark.Title), outlinesNum, dest)
 			if i > 0 {
 				body += fmt.Sprintf(" /Prev %d 0 R", num-1)
 			}

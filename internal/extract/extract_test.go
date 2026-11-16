@@ -94,6 +94,28 @@ func TestExtractReadsTheOutline(t *testing.T) {
 	}
 }
 
+func TestExtractReadsOutlinePositions(t *testing.T) {
+	pdf := testpdf.Build(1, testpdf.WithOutline(
+		testpdf.Bookmark{Title: "Top", Page: 1, Y: 760},
+		testpdf.Bookmark{Title: "Middle", Page: 1, Y: 400},
+	))
+
+	doc, err := extractBytes(t, newExtractor(t, extract.Options{}), pdf)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+
+	if len(doc.Outline) != 2 {
+		t.Fatalf("outline has %d entries, want 2", len(doc.Outline))
+	}
+	if got := doc.Outline[0].Y; got < 759 || got > 761 {
+		t.Errorf("first entry Y = %v, want about 760", got)
+	}
+	if got := doc.Outline[1].Y; got < 399 || got > 401 {
+		t.Errorf("second entry Y = %v, want about 400", got)
+	}
+}
+
 func TestExtractWithoutOutline(t *testing.T) {
 	doc, err := extractBytes(t, newExtractor(t, extract.Options{}), testpdf.Build(1))
 	if err != nil {
