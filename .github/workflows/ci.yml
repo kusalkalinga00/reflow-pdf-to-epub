@@ -26,6 +26,11 @@ jobs:
           echo "PKG_CONFIG_PATH=$PWD/.pdfium/lib/pkgconfig" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$PWD/.pdfium/lib" >> "$GITHUB_ENV"
 
+      - name: Install EPUBCheck
+        run: |
+          ./scripts/epubcheck.sh
+          echo "EPUBCHECK_JAR=$PWD/.epubcheck/epubcheck-5.4.0/epubcheck.jar" >> "$GITHUB_ENV"
+
       - name: Install Tesseract
         run: |
           sudo apt-get update

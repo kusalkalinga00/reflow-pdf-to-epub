@@ -16,6 +16,7 @@ import (
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ingest"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ocr"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/validate"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/web"
 )
 
@@ -34,6 +35,7 @@ meant to be exposed to a network.
 	maxMB := fs.Int("max-mb", int(ingest.DefaultLimits.MaxBytes>>20), "largest accepted upload in MB")
 	concurrency := fs.Int("jobs", 2, "conversions allowed at once")
 	useOCR := fs.Bool("ocr", true, "read pages with no text layer using tesseract")
+	useValidation := fs.Bool("validate", true, "reject books that fail EPUBCheck")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -53,7 +55,18 @@ meant to be exposed to a network.
 		}
 	}
 
-	converter, err := convert.New(convert.Options{OCR: recognizer})
+	var validator *validate.EpubCheck
+	if *useValidation {
+		v, vErr := validate.NewEpubCheck()
+		if vErr != nil {
+			fmt.Fprintln(stderr, "reflow: validation disabled:", vErr)
+		} else {
+			validator = v
+			fmt.Fprintln(stdout, "epubcheck: validating every conversion")
+		}
+	}
+
+	converter, err := convert.New(convert.Options{OCR: recognizer, Validator: validator})
 	if err != nil {
 		fmt.Fprintln(stderr, "reflow:", err)
 		return exitFailure

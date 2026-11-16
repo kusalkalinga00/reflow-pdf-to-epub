@@ -9,13 +9,21 @@ PDFIUM_DIR ?= $(CURDIR)/.pdfium
 PDFIUM_PC := $(PDFIUM_DIR)/lib/pkgconfig/pdfium.pc
 export PKG_CONFIG_PATH := $(PDFIUM_PC:/pdfium.pc=)
 
+EPUBCHECK_DIR ?= $(CURDIR)/.epubcheck
+EPUBCHECK_VERSION ?= 5.4.0
+EPUBCHECK_JAR := $(EPUBCHECK_DIR)/epubcheck-$(EPUBCHECK_VERSION)/epubcheck.jar
+export EPUBCHECK_JAR
+
 all: check build
 
 ## deps: download the pinned PDFium SDK if it is not already present
-deps: $(PDFIUM_PC)
+deps: $(PDFIUM_PC) $(EPUBCHECK_JAR)
 
 $(PDFIUM_PC):
 	PDFIUM_DIR=$(PDFIUM_DIR) ./scripts/pdfium.sh
+
+$(EPUBCHECK_JAR):
+	EPUBCHECK_DIR=$(EPUBCHECK_DIR) EPUBCHECK_VERSION=$(EPUBCHECK_VERSION) ./scripts/epubcheck.sh
 
 ## build: compile the CLI into bin/
 build: deps
@@ -53,6 +61,6 @@ run: deps
 clean:
 	rm -rf bin
 
-## clean-all: remove build output and the PDFium SDK
+## clean-all: remove build output and downloaded SDKs
 clean-all: clean
-	rm -rf $(PDFIUM_DIR)
+	rm -rf $(PDFIUM_DIR) $(EPUBCHECK_DIR)

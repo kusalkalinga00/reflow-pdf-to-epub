@@ -13,6 +13,7 @@ import (
 
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ocr"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/validate"
 )
 
 func convertCmd(args []string, stdout, stderr io.Writer) int {
@@ -28,6 +29,7 @@ Convert a PDF into a reflowable EPUB 3 ebook.
 	outPath := fs.String("o", "", "output EPUB path (default: the input name with .epub)")
 	quiet := fs.Bool("q", false, "suppress progress messages")
 	useOCR := fs.Bool("ocr", true, "read pages with no text layer using tesseract")
+	useValidation := fs.Bool("validate", true, "reject the book if EPUBCheck finds errors")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -75,13 +77,27 @@ Convert a PDF into a reflowable EPUB 3 ebook.
 		}
 	}
 
-	result, err := convert.Convert(ctx, f, info.Size(), convert.Options{OCR: recognizer}, convert.DocOptions{Name: filepath.Base(path)})
+	var validator *validate.EpubCheck
+	if *useValidation {
+		validator, err = validate.NewEpubCheck()
+		if err != nil {
+			progress("validation skipped: %v", err)
+		}
+	}
+
+	result, err := convert.Convert(ctx, f, info.Size(), convert.Options{
+		OCR:       recognizer,
+		Validator: validator,
+	}, convert.DocOptions{Name: filepath.Base(path)})
 	if err != nil {
 		fmt.Fprintln(stderr, "reflow:", convert.Explain(err))
 		return exitFailure
 	}
 
 	progress("%d pages, %d blocks, %d chapters", result.Pages, result.Blocks, len(result.Chapters))
+	if result.Validation != nil {
+		progress("epubcheck: %d errors, %d warnings", result.Validation.Errors, result.Validation.Warnings)
+	}
 	for _, issue := range result.Quality.Issues {
 		progress("  %s: %s", strings.ToUpper(string(issue.Severity)), issue.Message)
 	}
