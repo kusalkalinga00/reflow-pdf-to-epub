@@ -24,6 +24,18 @@ Go (API, worker, engine) · Next.js + TypeScript (web) · Postgres (state + queu
 River) · S3/R2 (files) · PDFium (extraction) · Tesseract (OCR) · epubcheck + ace
 (validation). Details and rejected alternatives in the proposal, §10.
 
+## Web UI
+
+```sh
+make run -- serve
+# reflow is listening on http://127.0.0.1:8080
+```
+
+A single page: drop a PDF, get an EPUB. Conversion happens in memory inside the
+request, so nothing is written to disk or kept afterwards. The server binds to
+localhost and has no accounts, no storage, and no queue — it runs the same
+`internal/convert` pipeline as the CLI.
+
 ## Non-goals
 
 No DRM circumvention, no layout preservation, no math OCR, no hosting of books.
@@ -41,6 +53,7 @@ make run -- inspect book.pdf
 make run -- extract book.pdf
 make run -- convert book.pdf -o book.epub
 make run -- corpus
+make run -- serve
 make check      # gofmt, go.mod tidy, vet, tests with -race
 ```
 
@@ -58,6 +71,8 @@ cmd/reflow/          CLI entry point
 internal/version/    build metadata
 internal/ingest/     PDF preflight: size and page limits, validity, encryption
 internal/extract/    PDFium text, line geometry, and coverage
+internal/convert/    the pipeline: PDF in, EPUB out
+internal/web/        local conversion server and upload page
 internal/corpus/     quality corpus: character recall, word error rate, reading order
 internal/normalize/  ligatures, Unicode, whitespace, and de-hyphenation
 internal/layout/     reading order for columns, running header and footer removal

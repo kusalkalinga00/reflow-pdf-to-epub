@@ -24,6 +24,7 @@ usage:
 commands:
   convert   convert a PDF into an EPUB
   corpus    run the quality corpus and report metrics
+  serve     start the local conversion UI
   extract   recover text and print the intermediate document model
   inspect   report the structure and metadata of a PDF
   version   print build version information
@@ -46,9 +47,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	switch args[0] {
 	case "convert":
-		return convert(args[1:], stdout, stderr)
+		return convertCmd(args[1:], stdout, stderr)
 	case "corpus":
 		return corpusCmd(args[1:], stdout, stderr)
+	case "serve":
+		return serveCmd(args[1:], stdout, stderr)
 	case "extract":
 		return extractDoc(args[1:], stdout, stderr)
 	case "inspect":
