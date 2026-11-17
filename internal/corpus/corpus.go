@@ -38,6 +38,9 @@ type Case struct {
 	// NoExpectation marks a diagnostic case with no ground truth: the
 	// conversion still runs, but only "did it produce a book" is checked.
 	NoExpectation bool
+	// Reference marks expected text that came from another extractor rather
+	// than from the document's source.
+	Reference bool
 }
 
 // Result is the outcome of running one case.
@@ -57,7 +60,9 @@ type Result struct {
 	ExpectedError bool `json:"expectedError,omitempty"`
 	// NoExpectation is set for diagnostic cases without expected text.
 	NoExpectation bool `json:"noExpectation,omitempty"`
-	Pages         int  `json:"pages,omitempty"`
+	// Reference is set when the expected text came from another extractor.
+	Reference bool `json:"reference,omitempty"`
+	Pages     int  `json:"pages,omitempty"`
 
 	Pass    bool   `json:"pass"`
 	Failure string `json:"failure,omitempty"`
@@ -130,9 +135,17 @@ func runCase(converter *convert.Converter, c Case) (res Result) {
 		return res
 	}
 
+	res.Reference = c.Reference
 	res.CharRecall = CharRecall(c.WantText, text)
 	res.WordErrorRate = WordErrorRate(c.WantText, text)
 	res.OrderOK = InOrder(text, c.WantOrder)
+
+	// Another extractor's output is a measurement, not a specification: it
+	// keeps the page furniture we remove, so the thresholds do not apply.
+	if c.Reference {
+		res.Pass = true
+		return res
+	}
 
 	var problems []string
 	if res.CharRecall < MinCharRecall {
