@@ -27,6 +27,7 @@ name.pdf needs a name.txt holding the text a reader should see.
 	dir := fs.String("dir", "", "directory of .pdf files with matching .txt expected text")
 	asJSON := fs.Bool("json", false, "write the results as JSON")
 	noExpect := fs.Bool("no-expect", false, "convert PDFs without expected .txt files and report diagnostics")
+	reference := fs.Bool("reference", false, "use pdftotext output as the expected text when no .txt exists")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -38,7 +39,10 @@ name.pdf needs a name.txt holding the text a reader should see.
 
 	cases := corpus.Synthetic()
 	if *dir != "" {
-		loaded, err := corpus.LoadDir(*dir, *noExpect)
+		loaded, err := corpus.LoadDir(*dir, corpus.LoadOptions{
+			AllowMissing: *noExpect,
+			Reference:    *reference,
+		})
 		if err != nil {
 			fmt.Fprintln(stderr, "reflow:", err)
 			return exitFailure
@@ -91,6 +95,9 @@ func printResults(w io.Writer, results []corpus.Result) {
 		result := "pass"
 		if !r.Pass {
 			result = "FAIL"
+		}
+		if r.Reference {
+			result += "*"
 		}
 
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n",
