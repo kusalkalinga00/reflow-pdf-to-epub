@@ -636,16 +636,37 @@ func (e *PDFium) metadata(doc references.FPDF_DOCUMENT) idm.Metadata {
 	return meta
 }
 
+func wordTexts(words []word) []string {
+	out := make([]string, len(words))
+	for i, w := range words {
+		out[i] = w.text
+	}
+	return out
+}
+
 func blocksFromLines(lines []line, page int) []idm.Block {
 	blocks := make([]idm.Block, 0, len(lines))
 	for _, l := range lines {
+		words := make([]idm.Word, len(l.words))
+		for i, w := range l.words {
+			words[i] = idm.Word{Text: w.text, Box: w.box}
+		}
+
+		// OCR lines carry whole-line text without per-word boxes; digital
+		// lines carry words. Both must produce their own text.
+		text := l.text
+		if len(words) > 0 {
+			text = strings.Join(wordTexts(l.words), " ")
+		}
+
 		blocks = append(blocks, idm.Block{
 			Kind:       idm.KindParagraph,
-			Text:       l.text,
+			Text:       text,
 			Page:       page,
 			BBox:       l.box,
 			Confidence: l.confidence,
 			FontSize:   l.fontSize,
+			Words:      words,
 		})
 	}
 	return blocks
