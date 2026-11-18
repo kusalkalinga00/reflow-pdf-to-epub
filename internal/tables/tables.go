@@ -23,6 +23,9 @@ type Rule struct {
 	Y          float64
 	Y0, Y1     float64
 	X0, X1     float64
+	// Page is the 1-based source page the rule was drawn on; extraction
+	// fills it so callers can group rules by page.
+	Page int
 }
 
 // MinHRule and MinVRule drop decoration: underlines and borders that are not
@@ -286,4 +289,9 @@ func (t Table) ColumnCount() int {
 		return 0
 	}
 	return len(t.Cells[0])
+}
+
+// LongRules exposes the rule filter for diagnostics.
+func LongRules(rules []Rule) (horizontal, vertical []Rule) {
+	return longRules(rules)
 }
