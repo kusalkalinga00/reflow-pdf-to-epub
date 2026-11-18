@@ -117,6 +117,9 @@ type Block struct {
 	// Words are the block's words with their boxes, when the source carries
 	// positions. Blocks without positions leave it empty.
 	Words []Word `json:"words,omitempty"`
+	// Table carries the recovered grid for KindTable blocks; the words that
+	// filled it are removed from the document's other blocks.
+	Table *TableGrid `json:"table,omitempty"`
 }
 
 // Image is a figure recovered from the source.
@@ -136,6 +139,23 @@ type Span struct {
 	Super  bool   `json:"super,omitempty"`
 	// Href is set when the span is a link, including footnote references.
 	Href string `json:"href,omitempty"`
+}
+
+// TableGrid is a recovered table: cells in reading order, one slice per row.
+type TableGrid struct {
+	// Cells[r][c] is the text of row r, column c; empty cells are empty
+	// strings. Every row has the same number of columns.
+	Cells [][]string `json:"cells"`
+}
+
+// Rows and Columns report the grid shape.
+func (g *TableGrid) Rows() int { return len(g.Cells) }
+
+func (g *TableGrid) Columns() int {
+	if len(g.Cells) == 0 {
+		return 0
+	}
+	return len(g.Cells[0])
 }
 
 // Word is one word with its position on the page. Words are what table
