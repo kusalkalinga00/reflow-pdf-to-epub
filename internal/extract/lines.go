@@ -15,6 +15,14 @@ type line struct {
 	box        idm.Rect
 	fontSize   float64
 	confidence float64
+	// words are the line's word boxes, in order. They are what table detection
+	// and footnote finding need; the line text is a convenience for readers.
+	words []word
+}
+
+type word struct {
+	text string
+	box  idm.Rect
 }
 
 // piece is one character with its box.
@@ -159,6 +167,7 @@ func flatten(runs [][]piece) []piece {
 // joinPieces assembles a line's characters and inserts the spaces a PDF relies
 // on positioning to show instead of space glyphs.
 func joinPieces(pieces []piece) line {
+	pieces = withWordBreaks(pieces)
 	if len(pieces) == 0 {
 		return line{}
 	}
@@ -178,25 +187,97 @@ func joinPieces(pieces []piece) line {
 
 	for i, p := range pieces {
 		if i > 0 {
-			gap := pieces[i-1].box.HorizontalGap(p.box)
-			// Kerning and glyph side bearings leave gaps of a point or two
-			// between letters; half an em is a word boundary.
-			if height > 0 && gap > 0.5*height && lastByte != ' ' && !strings.HasPrefix(p.text, " ") {
-				b.WriteByte(' ')
-				lastByte = ' '
-			}
 			box = union(box, p.box)
 		}
 		b.WriteString(p.text)
-		lastByte = p.text[len(p.text)-1]
+		if p.text != "" {
+			lastByte = p.text[len(p.text)-1]
+		}
 	}
+	_ = lastByte
 
 	text := strings.Join(strings.Fields(b.String()), " ")
 	if text == "" {
 		return line{}
 	}
 
-	return line{text: text, box: box, fontSize: capHeight(pieces, box), confidence: 1}
+	return line{
+		text:       text,
+		box:        box,
+		fontSize:   capHeight(pieces, box),
+		confidence: 1,
+		words:      wordBoxes(pieces),
+	}
+}
+
+// withWordBreaks makes the gap rule explicit: a break is a space piece between
+// the two characters it separates. Real space glyphs are kept; synthetic ones
+// are inserted at the same gaps that once produced a space in the text, so the
+// word list and the line text are built from one sequence.
+func withWordBreaks(pieces []piece) []piece {
+	return splitWords(pieces)
+}
+
+// splitWords inserts synthetic word breaks at the gaps that already produced a
+// space in the line text, so the word list matches the text exactly.
+func splitWords(pieces []piece) []piece {
+	out := make([]piece, 0, len(pieces))
+	for i, p := range pieces {
+		if i > 0 {
+			prev := pieces[i-1]
+			gap := prev.box.HorizontalGap(p.box)
+			height := math.Max(prev.box.Height(), p.box.Height())
+			if height > 0 && gap > 0.5*height && !isSpace(prev.text) {
+				out = append(out, piece{text: " ", box: idm.Rect{
+					X0: prev.box.X1, Y0: p.box.Y0, X1: p.box.X0, Y1: p.box.Y1,
+				}})
+			}
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// wordBoxes merges character pieces into words, keeping each word's box. The
+// pieces must already contain the synthetic space pieces from splitWords.
+func wordBoxes(pieces []piece) []word {
+	var out []word
+
+	var (
+		text strings.Builder
+		box  idm.Rect
+		open bool
+	)
+
+	flush := func() {
+		if !open {
+			return
+		}
+		if t := strings.TrimSpace(text.String()); t != "" {
+			out = append(out, word{text: t, box: box})
+		}
+		text.Reset()
+		open = false
+	}
+
+	for _, p := range pieces {
+		// A break is a break whether it was a real space glyph or a synthetic
+		// one inserted at a gap: both are space pieces in this sequence.
+		if strings.TrimSpace(p.text) == "" {
+			flush()
+			continue
+		}
+		if open {
+			box = union(box, p.box)
+		} else {
+			box = p.box
+			open = true
+		}
+		text.WriteString(p.text)
+	}
+	flush()
+
+	return out
 }
 
 // capHeight estimates the text size from the line's ascender-to-baseline
@@ -269,6 +350,12 @@ func appendLine(lines []line, l line) []line {
 func rectOf(c *responses.GetPageTextStructuredChar) idm.Rect {
 	p := c.PointPosition
 	return idm.Rect{X0: p.Left, Y0: p.Bottom, X1: p.Right, Y1: p.Top}
+}
+
+// isSpace reports whether a piece is a space glyph. Space glyphs have no height
+// and arrive in content order between the words they separate.
+func isSpace(text string) bool {
+	return strings.TrimSpace(text) == ""
 }
 
 func isNewline(text string) bool {
