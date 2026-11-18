@@ -15,6 +15,7 @@ type config struct {
 	mediaBox        func(page int) string
 	pages           [][]Line
 	hasPages        bool
+	rules           []LineRule
 	outline         []Bookmark
 	image           []byte
 	imageW          int
@@ -24,6 +25,16 @@ type config struct {
 	imageFilter     string
 	imageColorspace string
 	imageBPC        int
+}
+
+// LineRule is one stroked line drawn on the first page, for table fixtures.
+type LineRule struct {
+	X0, Y0, X1, Y1 float64
+}
+
+// WithRules draws stroked lines on the first page.
+func WithRules(rules ...LineRule) Option {
+	return func(c *config) { c.rules = rules }
 }
 
 // Bookmark is one entry in the PDF outline, pointing at a 1-based page.
@@ -143,6 +154,11 @@ func Build(pages int, opts ...Option) []byte {
 			stream = ""
 			if i < len(cfg.pages) {
 				stream = contentStream(cfg.pages[i])
+			}
+		}
+		if i == 0 {
+			for _, r := range cfg.rules {
+				stream += fmt.Sprintf("%.2f %.2f m %.2f %.2f l S\n", r.X0, r.Y0, r.X1, r.Y1)
 			}
 		}
 		if i == 0 && len(cfg.image) > 0 {
