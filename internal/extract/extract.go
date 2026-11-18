@@ -13,6 +13,7 @@ import (
 	"image"
 	"image/png"
 	"io"
+	"math"
 	"strings"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ocr"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/tables"
 )
 
 // Extractor converts a PDF into an idm.Document.
@@ -44,6 +46,9 @@ type Options struct {
 	// OCR reads pages that have no text layer. Nil disables it, and the page is
 	// left empty as before.
 	OCR ocr.Recognizer
+	// Rules collects drawn line segments, scaled to page coordinates, for
+	// table detection. It is nil unless the caller asks.
+	Rules *[]tables.Rule
 	// OCRDPI is the resolution pages are rendered at for OCR. Zero means 300.
 	OCRDPI int
 }
@@ -166,6 +171,10 @@ func (e *PDFium) extractPage(ctx context.Context, doc references.FPDF_DOCUMENT, 
 
 	lines := buildLines(text.Chars)
 	provenance := idm.ProvenanceDigital
+
+	if e.opts.Rules != nil {
+		*e.opts.Rules = append(*e.opts.Rules, e.rules(doc, index, size.Width, size.Height)...)
+	}
 
 	// A page with no text layer is either blank or a scan. OCR is the only way
 	// to tell, and the only way to recover it.
@@ -388,6 +397,135 @@ func (e *PDFium) destPosition(doc references.FPDF_DOCUMENT, dest references.FPDF
 // minImagePixels drops images too small to be a figure: bullets, icons and
 // rules are drawn as images in some producers.
 const minImagePixels = 48
+
+// rules collects the drawn line segments of a page, scaled into page
+// coordinates.
+//
+// PDFium reports path points in the path's own transformation space, which on
+// real documents is not user space: on the invoice corpus the points ran to
+// 794x1123 on a 595x842 page. The largest observed point extent defines the
+// scale, which maps the grid onto the words exactly.
+func (e *PDFium) rules(doc references.FPDF_DOCUMENT, index int, pageWidth, pageHeight float64) []tables.Rule {
+	page := requests.Page{ByIndex: &requests.PageByIndex{Document: doc, Index: index}}
+
+	objects, err := e.instance.FPDFPage_CountObjects(&requests.FPDFPage_CountObjects{Page: page})
+	if err != nil {
+		return nil
+	}
+
+	type path struct {
+		points [][2]float64
+	}
+	var paths []path
+
+	for i := 0; i < objects.Count; i++ {
+		obj, err := e.instance.FPDFPage_GetObject(&requests.FPDFPage_GetObject{Page: page, Index: i})
+		if err != nil {
+			continue
+		}
+		kind, err := e.instance.FPDFPageObj_GetType(&requests.FPDFPageObj_GetType{PageObject: obj.PageObject})
+		if err != nil || kind.Type != enums.FPDF_PAGEOBJ_PATH {
+			continue
+		}
+
+		segments, err := e.instance.FPDFPath_CountSegments(&requests.FPDFPath_CountSegments{PageObject: obj.PageObject})
+		if err != nil {
+			continue
+		}
+
+		var points [][2]float64
+		for s := 0; s < segments.Count; s++ {
+			segment, err := e.instance.FPDFPath_GetPathSegment(&requests.FPDFPath_GetPathSegment{
+				PageObject: obj.PageObject, Index: s,
+			})
+			if err != nil {
+				continue
+			}
+			segmentType, err := e.instance.FPDFPathSegment_GetType(&requests.FPDFPathSegment_GetType{
+				PathSegment: segment.PathSegment,
+			})
+			if err != nil {
+				continue
+			}
+			if segmentType.Type != enums.FPDF_SEGMENT_LINETO && segmentType.Type != enums.FPDF_SEGMENT_MOVETO {
+				continue
+			}
+			point, err := e.instance.FPDFPathSegment_GetPoint(&requests.FPDFPathSegment_GetPoint{
+				PathSegment: segment.PathSegment,
+			})
+			if err != nil {
+				continue
+			}
+			points = append(points, [2]float64{float64(point.X), float64(point.Y)})
+		}
+		if len(points) >= 2 {
+			paths = append(paths, path{points: points})
+		}
+	}
+
+	// The path space extent, to scale from.
+	maxX, maxY := 0.0, 0.0
+	for _, p := range paths {
+		for _, pt := range p.points {
+			if pt[0] > maxX {
+				maxX = pt[0]
+			}
+			if pt[1] > maxY {
+				maxY = pt[1]
+			}
+		}
+	}
+	sx, sy := 1.0, 1.0
+	if maxX > pageWidth && maxX > 0 {
+		sx = pageWidth / maxX
+	}
+	if maxY > pageHeight && maxY > 0 {
+		sy = pageHeight / maxY
+	}
+
+	var rules []tables.Rule
+	for _, p := range paths {
+		for j := 1; j < len(p.points); j++ {
+			x0, y0 := p.points[j-1][0]*sx, p.points[j-1][1]*sy
+			x1, y1 := p.points[j][0]*sx, p.points[j][1]*sy
+
+			// Page borders are not table rules; most documents draw one.
+			if y0 < 15 || y0 > pageHeight-15 || x0 < 15 || x0 > pageWidth-15 {
+				continue
+			}
+			if y1 < 15 || y1 > pageHeight-15 || x1 < 15 || x1 > pageWidth-15 {
+				continue
+			}
+
+			switch {
+			case abs(y1-y0) < 1 && abs(x1-x0) >= tables.MinHRule:
+				rules = append(rules, tables.Rule{
+					Horizontal: true,
+					Y:          (y0 + y1) / 2,
+					X0:         math.Min(x0, x1),
+					X1:         math.Max(x0, x1),
+				})
+			case abs(x1-x0) < 1 && abs(y1-y0) >= tables.MinVRule:
+				rules = append(rules, tables.Rule{
+					Horizontal: false,
+					X0:         (x0 + x1) / 2,
+					X1:         (x0 + x1) / 2,
+					Y0:         math.Min(y0, y1),
+					Y1:         math.Max(y0, y1),
+				})
+			}
+		}
+	}
+
+	return rules
+}
+
+func abs(f float64) float64 {
+	if f < 0 {
+		return -f
+	}
+	return f
+}
 
 // images collects JPEG figures from a page.
 //
