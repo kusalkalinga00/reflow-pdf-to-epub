@@ -173,7 +173,10 @@ func (e *PDFium) extractPage(ctx context.Context, doc references.FPDF_DOCUMENT, 
 	provenance := idm.ProvenanceDigital
 
 	if e.opts.Rules != nil {
-		*e.opts.Rules = append(*e.opts.Rules, e.rules(doc, index, size.Width, size.Height)...)
+		for _, rule := range e.rules(doc, index, size.Width, size.Height) {
+			rule.Page = index + 1
+			*e.opts.Rules = append(*e.opts.Rules, rule)
+		}
 	}
 
 	// A page with no text layer is either blank or a scan. OCR is the only way
