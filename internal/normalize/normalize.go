@@ -38,9 +38,15 @@ func Apply(doc idm.Document) idm.Document {
 		for j, s := range b.Spans {
 			spans[j] = s
 			spans[j].Text = spanText(s.Text)
+			if j > 0 {
+				joined.WriteByte(' ')
+			}
 			joined.WriteString(spans[j].Text)
 		}
 		if joined.String() != blocks[i].Text {
+			// The runs cannot reconstruct the normalized text, so styling is
+			// dropped rather than kept inconsistent with the text.
+			blocks[i].Spans = nil
 			continue
 		}
 		blocks[i].Spans = spans
@@ -113,6 +119,12 @@ func isControl(r rune) bool {
 
 // spanText normalizes a styled run, keeping one space at either edge so the
 // runs still reproduce the block's spacing when concatenated.
+//
+// Extraction produces one run per word and the block text joins them with
+// single spaces, so a run whose normalization does not change its inner or
+// edge whitespace can be left exactly as it is. Anything else falls back to
+// the block text and the styling is dropped rather than producing a block
+// that fails validation.
 func spanText(s string) string {
 	if s == "" {
 		return ""

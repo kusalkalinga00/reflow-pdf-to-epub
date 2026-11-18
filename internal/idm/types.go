@@ -114,6 +114,9 @@ type Block struct {
 	// Spans carries inline styling. It is optional: a block with no spans has
 	// no styling beyond its kind.
 	Spans []Span `json:"spans,omitempty"`
+	// Words are the block's words with their boxes, when the source carries
+	// positions. Blocks without positions leave it empty.
+	Words []Word `json:"words,omitempty"`
 }
 
 // Image is a figure recovered from the source.
@@ -133,6 +136,14 @@ type Span struct {
 	Super  bool   `json:"super,omitempty"`
 	// Href is set when the span is a link, including footnote references.
 	Href string `json:"href,omitempty"`
+}
+
+// Word is one word with its position on the page. Words are what table
+// detection and footnote finding need; spans carry styling, which extraction
+// does not produce yet, and the two must not be conflated.
+type Word struct {
+	Text string `json:"text"`
+	Box  Rect   `json:"box"`
 }
 
 // OutlineEntry is one bookmark from the PDF's own table of contents. Page is

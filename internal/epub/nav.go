@@ -94,13 +94,26 @@ func (b *prepared) ncxDocument() ([]byte, error) {
 	}
 
 	if len(b.pages) > 0 {
+		// The NCX requires pageTarget value+type pairs to be unique; a source
+		// whose pages map to duplicate labels (two bookmarks on one page)
+		// would produce a book epubcheck rejects.
+		seen := make(map[string]bool, len(b.pages))
+		order := 0
+
 		pageList := ncx.CreateElement("pageList")
-		for i, pg := range b.pages {
+		for _, pg := range b.pages {
+			key := pg.Label + "\x00normal"
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			order++
+
 			target := setAttr(pageList, "pageTarget",
-				"id", fmt.Sprintf("pageTarget-%d", i+1),
+				"id", fmt.Sprintf("pageTarget-%d", order),
 				"value", pg.Label,
 				"type", "normal",
-				"playOrder", strconv.Itoa(len(b.chapters)+i+1),
+				"playOrder", strconv.Itoa(len(b.chapters)+order),
 			)
 			label := target.CreateElement("navLabel")
 			setText(label, "text", pg.Label)

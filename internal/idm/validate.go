@@ -176,6 +176,15 @@ func (d Document) Validate() error {
 				add(path+".spans", "spans must concatenate to text, got %q", joined.String())
 			}
 		}
+
+		for j, w := range block.Words {
+			if w.Text == "" || strings.TrimSpace(w.Text) == "" {
+				add(fmt.Sprintf("%s.words[%d].text", path, j), "must not be empty")
+			}
+			if !w.Box.Valid() {
+				add(fmt.Sprintf("%s.words[%d].box", path, j), "must have ordered coordinates")
+			}
+		}
 	}
 
 	if len(problems) > 0 {
