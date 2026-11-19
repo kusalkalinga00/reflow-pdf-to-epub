@@ -315,3 +315,134 @@ func TestRightAlignedDatesStayWithTheirEntries(t *testing.T) {
 		t.Errorf("order = %v, want %v", got, want)
 	}
 }
+
+func TestParallelColumnsInABandReadColumnWise(t *testing.T) {
+	// The invoice's header: a label and its value on the left, a label and
+	// an address on the right, sharing lines. The columns read whole, so
+	// each label keeps its value.
+	doc := document(1,
+		block("Invoice Date:", 1, 46, 668.6, 111.3, 676.7),
+		block("12 November, 2026", 1, 45.8, 651.8, 141.1, 661.4),
+		block("INVOICE TO", 1, 308.7, 668.6, 371.7, 676.4),
+		block("Artin (PVT) Ltd", 1, 308.4, 652.7, 383.6, 662.3),
+		block("26/7A", 1, 308.9, 636.8, 336.6, 645.9),
+		block("1st Lane", 1, 308.6, 622.8, 348.0, 630.6),
+	)
+
+	got := texts(Apply(doc).Blocks)
+	want := []string{
+		"Invoice Date:", "12 November, 2026",
+		"INVOICE TO", "Artin (PVT) Ltd", "26/7A", "1st Lane",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("order = %v, want %v", got, want)
+	}
+}
+
+func TestPairedCellsReadRowByRow(t *testing.T) {
+	// The invoice's totals: each label shares its line with its value. The
+	// pairs read together, not all labels then all values.
+	// The page's text sits at the margin above; the totals box floats below
+	// it, aligned with the table's amount column.
+	doc := document(1,
+		block("10 November, 2026", 1, 45.8, 177.8, 144.2, 187.4),
+		block("New Code Changes Review", 1, 167.4, 177.4, 306.7, 187.6),
+		block("LKR 1,500.00", 1, 472.8, 177.8, 540.2, 187.4),
+		block("Sub Total", 1, 318.3, 130.8, 367.1, 138.7),
+		block("LKR 15,000.00", 1, 474.2, 128.9, 549.4, 138.7),
+		block("Total Amount", 1, 318.2, 94.1, 389.6, 101.8),
+		block("LKR 15,000.00", 1, 474.0, 92.1, 549.5, 101.9),
+	)
+
+	got := texts(Apply(doc).Blocks)
+	want := []string{
+		"10 November, 2026", "New Code Changes Review", "LKR 1,500.00",
+		"Sub Total", "LKR 15,000.00",
+		"Total Amount", "LKR 15,000.00",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("order = %v, want %v", got, want)
+	}
+}
+
+func TestSideBySideEntriesReadColumnWise(t *testing.T) {
+	// The CV's education: two degree entries side by side, each several
+	// lines, with the section heading over the left one. Reading line by
+	// line would interleave the two degrees.
+	doc := document(1,
+		block("EDUCATION", 1, 35.8, 600.1, 109.1, 609.7),
+		block("BEng (Hons) in Software Engineering", 1, 34.6, 568.6, 225.8, 580.2),
+		block("London Metropolitan University (UK)", 1, 34.7, 554.8, 218.1, 566.3),
+		block("First Class", 1, 34.7, 542.1, 85.8, 550.3),
+		block("Level 5 Pearson BTEC HND in Computing", 1, 300.6, 569.7, 513.7, 580.3),
+		block("(Software Engineering)", 1, 300.3, 554.7, 420.9, 566.3),
+		block("Pearson (formerly Edexcel)", 1, 300.6, 539.8, 436.8, 551.3),
+	)
+
+	got := texts(Apply(doc).Blocks)
+	want := []string{
+		"EDUCATION",
+		"BEng (Hons) in Software Engineering",
+		"London Metropolitan University (UK)",
+		"First Class",
+		"Level 5 Pearson BTEC HND in Computing",
+		"(Software Engineering)",
+		"Pearson (formerly Edexcel)",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("order = %v, want %v", got, want)
+	}
+}
+
+func TestAMarginStripReadsWithTheHeaderNotAfterTheBody(t *testing.T) {
+	// A résumé entry: title and employer at the margin, duties indented
+	// below them, dates in a narrow strip beside the title. The dates read
+	// with the entry — after the employer, before the duties — not after
+	// every line of the body.
+	doc := document(1,
+		block("Junior Web Developer (Freelance)", 1, 33, 511.3, 216.4, 522.8),
+		block("LKLoop", 1, 33, 495.1, 70.2, 504.7),
+		block("Developed custom themes and plugins", 1, 52.4, 476.2, 374.1, 487.4),
+		block("Developed dashboards using bootstrap", 1, 52.4, 461.2, 304.3, 472.0),
+		block("Sep 2020 -", 1, 446.3, 511.3, 506.1, 522.2),
+		block("Jan 2022", 1, 509.1, 513.3, 556.7, 522.2),
+	)
+
+	got := texts(Apply(doc).Blocks)
+	want := []string{
+		"Junior Web Developer (Freelance)",
+		"LKLoop",
+		"Sep 2020 -", "Jan 2022",
+		"Developed custom themes and plugins",
+		"Developed dashboards using bootstrap",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("order = %v, want %v", got, want)
+	}
+}
+
+func TestBlocksOnOneLineReadLeftToRight(t *testing.T) {
+	// A label and the link beside it sit a fraction of a point apart in y.
+	// A pure top-down sort interleaves them by whichever is the hair higher;
+	// the line they share reads left to right.
+	doc := document(1,
+		block("GitHub -", 1, 46.0, 304.5, 89.1, 313.0),
+		block("github.com/kusalkalinga00", 1, 91.0, 302.3, 229.2, 313.5),
+		block("LinkedIn -", 1, 46.0, 289.7, 94.6, 298.0),
+		block("linkedin.com/in/kusal-kalinga", 1, 97.8, 287.2, 246.4, 298.4),
+	)
+
+	got := texts(Apply(doc).Blocks)
+	want := []string{
+		"GitHub -", "github.com/kusalkalinga00",
+		"LinkedIn -", "linkedin.com/in/kusal-kalinga",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("order = %v, want %v", got, want)
+	}
+}
