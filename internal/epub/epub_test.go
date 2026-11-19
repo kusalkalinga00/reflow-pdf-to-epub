@@ -775,3 +775,192 @@ func TestEveryXMLDocumentIsWellFormed(t *testing.T) {
 		}
 	}
 }
+
+func TestSectionsNestInsideTheirChapterInNavigation(t *testing.T) {
+	book := sampleBook()
+	book.Chapters[0].Body = `<span id="page-1"></span><h1>Chapter 1</h1><p>Opening.</p><span id="sec-01"></span><h2>First step</h2><p>Step one.</p>
+<span id="sec-02"></span><h2>Second step</h2><p>Step two.</p>`
+	book.Chapters[0].Sections = []Section{
+		{Title: "First step", Href: "text/chapter-001.xhtml#sec-01"},
+		{Title: "Second step", Href: "text/chapter-001.xhtml#sec-02"},
+	}
+
+	a := openArchive(t, mustWrite(t, book))
+	doc := mustParseXML(t, a.mustGet(t, "OEBPS/nav.xhtml"))
+
+	var toc *etree.Element
+	for _, nav := range findAll(doc.Root(), "nav") {
+		if nav.SelectAttrValue("epub:type", "") == "toc" {
+			toc = nav
+		}
+	}
+	if toc == nil {
+		t.Fatal("no toc nav")
+	}
+
+	links := findAll(toc, "a")
+	if len(links) != 4 {
+		t.Fatalf("toc has %d links, want 4 (2 chapters + 2 sections)", len(links))
+	}
+	if got, want := links[1].SelectAttrValue("href", ""), "text/chapter-001.xhtml#sec-01"; got != want {
+		t.Errorf("section link = %q, want %q", got, want)
+	}
+
+	// The sections must sit inside the first chapter's list item, not beside
+	// it: a flat list would hide the document's depth.
+	var items []*etree.Element
+	for _, ol := range toc.ChildElements() {
+		if ol.FullTag() == "ol" {
+			items = ol.ChildElements()
+		}
+	}
+	if len(items) != 2 {
+		t.Fatalf("toc has %d top-level items, want 2", len(items))
+	}
+	var nested []*etree.Element
+	for _, child := range items[0].ChildElements() {
+		if child.FullTag() == "ol" {
+			nested = child.ChildElements()
+		}
+	}
+	if len(nested) != 2 {
+		t.Fatalf("first chapter nests %d items, want 2", len(nested))
+	}
+
+	ncx := mustParseXML(t, a.mustGet(t, "OEBPS/toc.ncx"))
+
+	var roots []*etree.Element
+	for _, navMap := range findAll(ncx.Root(), "navMap") {
+		for _, child := range navMap.ChildElements() {
+			if child.FullTag() == "navPoint" {
+				roots = append(roots, child)
+			}
+		}
+	}
+	if len(roots) != 2 {
+		t.Fatalf("ncx navMap has %d top-level navPoints, want 2", len(roots))
+	}
+
+	var sectionPoints []*etree.Element
+	for _, child := range roots[0].ChildElements() {
+		if child.FullTag() == "navPoint" {
+			sectionPoints = append(sectionPoints, child)
+		}
+	}
+	if len(sectionPoints) != 2 {
+		t.Fatalf("first chapter nests %d navPoints, want 2 sections", len(sectionPoints))
+	}
+
+	// playOrder must be unique across every navPoint and pageTarget.
+	points := findAll(ncx.Root(), "navPoint")
+	targets := findAll(ncx.Root(), "pageTarget")
+	seen := map[string]bool{}
+	for _, el := range append(points, targets...) {
+		order := el.SelectAttrValue("playOrder", "")
+		if order == "" {
+			t.Errorf("%s has no playOrder", el.FullTag())
+			continue
+		}
+		if seen[order] {
+			t.Errorf("duplicate playOrder %s", order)
+		}
+		seen[order] = true
+	}
+	if len(seen) != len(points)+len(targets) {
+		t.Errorf("%d playOrders for %d navPoints and %d pageTargets", len(seen), len(points), len(targets))
+	}
+}
+
+func TestSectionWithMissingAnchorIsRejected(t *testing.T) {
+	book := sampleBook()
+	book.Chapters[0].Sections = []Section{
+		{Title: "Missing", Href: "text/chapter-001.xhtml#sec-99"},
+	}
+
+	if _, err := WriteBytes(book); err == nil {
+		t.Fatal("WriteBytes accepted a section pointing at a missing anchor")
+	}
+}
+
+func TestSectionOutsideItsChapterIsRejected(t *testing.T) {
+	book := sampleBook()
+	book.Chapters[0].Sections = []Section{
+		{Title: "Elsewhere", Href: "text/chapter-002.xhtml#page-2"},
+	}
+
+	if _, err := WriteBytes(book); err == nil {
+		t.Fatal("WriteBytes accepted a section pointing at another chapter")
+	}
+}
+
+func TestDeeperSectionsNestUnderTheirParent(t *testing.T) {
+	book := sampleBook()
+	book.Chapters[0].Body = `<span id="page-1"></span><h1>Chapter 1</h1><p>Opening.</p>
+<span id="sec-01"></span><h2>Part</h2><p>Part text.</p>
+<span id="sec-02"></span><h3>Child</h3><p>Child text.</p>
+<span id="sec-03"></span><h2>Sibling</h2><p>Sibling text.</p>`
+	book.Chapters[0].Sections = []Section{
+		{Title: "Part", Href: "text/chapter-001.xhtml#sec-01", Level: 2},
+		{Title: "Child", Href: "text/chapter-001.xhtml#sec-02", Level: 3},
+		{Title: "Sibling", Href: "text/chapter-001.xhtml#sec-03", Level: 2},
+	}
+
+	a := openArchive(t, mustWrite(t, book))
+	doc := mustParseXML(t, a.mustGet(t, "OEBPS/nav.xhtml"))
+
+	var toc *etree.Element
+	for _, nav := range findAll(doc.Root(), "nav") {
+		if nav.SelectAttrValue("epub:type", "") == "toc" {
+			toc = nav
+		}
+	}
+	if toc == nil {
+		t.Fatal("no toc nav")
+	}
+
+	var chapterLI *etree.Element
+	for _, ol := range toc.ChildElements() {
+		if ol.FullTag() == "ol" {
+			chapterLI = ol.ChildElements()[0]
+		}
+	}
+	if chapterLI == nil {
+		t.Fatal("no chapter item")
+	}
+
+	// Chapter > ol (2 items); the first item holds the child's ol (1 item).
+	var sections []*etree.Element
+	for _, child := range chapterLI.ChildElements() {
+		if child.FullTag() == "ol" {
+			sections = child.ChildElements()
+		}
+	}
+	if len(sections) != 2 {
+		t.Fatalf("chapter nests %d sections, want 2", len(sections))
+	}
+
+	var children []*etree.Element
+	for _, child := range sections[0].ChildElements() {
+		if child.FullTag() == "ol" {
+			children = child.ChildElements()
+		}
+	}
+	if len(children) != 1 {
+		t.Fatalf("first section nests %d children, want 1", len(children))
+	}
+	if got, want := findAll(children[0], "a")[0].Text(), "Child"; got != want {
+		t.Errorf("child label = %q, want %q", got, want)
+	}
+
+	ncx := mustParseXML(t, a.mustGet(t, "OEBPS/toc.ncx"))
+	for _, head := range findAll(ncx.Root(), "head") {
+		metas := findAll(head, "meta")
+		for _, meta := range metas {
+			if meta.SelectAttrValue("name", "") == "dtb:depth" {
+				if got, want := meta.SelectAttrValue("content", ""), "3"; got != want {
+					t.Errorf("dtb:depth = %q, want %q", got, want)
+				}
+			}
+		}
+	}
+}
