@@ -63,6 +63,41 @@ that is not present — so the contract is checked rather than claimed.
 
 No DRM circumvention, no layout preservation, no math OCR, no hosting of books.
 
+## Install
+
+Each release carries binary archives and a container image.
+
+**Binaries** — `reflow_<version>_<os>_<arch>.tar.gz` for Linux amd64 and
+macOS amd64/arm64. The archive holds the CLI and the PDFium library beside it,
+found through a relative rpath, so nothing needs installing:
+
+```sh
+tar xzf reflow_0.2.0_darwin_arm64.tar.gz
+./reflow convert book.pdf -o book.epub
+```
+
+A checksum sits beside every archive (`reflow_..._....tar.gz.sha256`).
+
+**Container** — Linux amd64 and arm64:
+
+```sh
+docker run --rm -p 127.0.0.1:8080:8080 \
+  ghcr.io/kusalkalinga00/tool-factory-epub-convertor:latest
+```
+
+The image carries PDFium, Tesseract and a JRE for EPUBCheck, so scanned pages
+are read and every book is validated before it is served. That completeness is
+why it is roughly 650 MB; OCR is English by default — extend the image with a
+`tesseract-ocr-<lang>` package for more. `/healthz` is there for a proxy or
+orchestrator.
+
+Reflow has no accounts and no authentication. Publish the port to your own
+machine (`127.0.0.1:` above) or put it behind a proxy that authenticates; do
+not bind it to a public interface as-is.
+
+Build the image yourself with `make docker` (add `IMAGE=` and `VERSION=` to
+tag it differently).
+
 ## Development
 
 Requires Go 1.27+, a C toolchain, and `pkg-config` (`brew install pkgconf`,
