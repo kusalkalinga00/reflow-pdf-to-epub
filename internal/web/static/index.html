@@ -30,7 +30,13 @@
       </div>
 
       <button type="submit" id="submit" disabled>Convert to EPUB</button>
+      <button type="button" id="cancel" class="secondary" hidden>Cancel</button>
     </form>
+
+    <div class="progress" id="progress-wrap" hidden>
+      <progress id="progress" max="100"></progress>
+      <p class="progress-label" id="progress-label"></p>
+    </div>
 
     <p class="status" id="status" role="status" aria-live="polite"></p>
 
