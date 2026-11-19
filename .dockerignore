@@ -1,0 +1,11 @@
+.git
+.github
+.gitignore
+.DS_Store
+bin
+out
+reflow
+.pdfium
+.epubcheck
+corpus/private
+coverage.out
