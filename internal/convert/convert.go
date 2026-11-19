@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/epub"
@@ -52,6 +53,22 @@ type Options struct {
 type DocOptions struct {
 	// Name is the source file name, used as a title fallback.
 	Name string
+	// Password opens a document the reader can already open. It overrides
+	// Options.Password for this document and is never written to disk or
+	// logs. A wrong password surfaces as ingest.ErrEncrypted.
+	Password string
+	// Progress, when set, is called as the conversion advances. It is called
+	// from the converting goroutine and must not block.
+	Progress func(Progress)
+}
+
+// Progress is one step of a conversion. Stage is "reading", "laying out",
+// "writing", "validating" or "done"; Done and Total count pages during
+// "reading" and are zero elsewhere.
+type Progress struct {
+	Stage string
+	Done  int
+	Total int
 }
 
 // Result is a completed conversion.
@@ -83,6 +100,9 @@ type Converter struct {
 	extractor *extract.PDFium
 	// rules accumulates the drawn rules of the document being converted.
 	rules []tables.Rule
+	// mu serializes conversions. The PDFium instance and the rules slice are
+	// per-converter state; a second caller waits rather than corrupting them.
+	mu sync.Mutex
 }
 
 // New starts a Converter. Callers must Close it.
@@ -114,16 +134,36 @@ func (c *Converter) Close() error { return c.extractor.Close() }
 func (c *Converter) Run(ctx context.Context, src io.ReaderAt, size int64, doc DocOptions) (Result, error) {
 	start := time.Now()
 
-	if _, err := ingest.Check(ctx, src, size, c.opts.Limits); err != nil {
+	password := c.opts.Password
+	if doc.Password != "" {
+		password = doc.Password
+	}
+	report := func(p Progress) {
+		if doc.Progress != nil {
+			doc.Progress(p)
+		}
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	report(Progress{Stage: "reading"})
+	if _, err := ingest.CheckWithPassword(ctx, src, size, c.opts.Limits, password); err != nil {
 		return Result{}, err
 	}
 
 	c.rules = c.rules[:0]
-	document, err := c.extractor.Extract(ctx, src, size)
+	document, err := c.extractor.ExtractDoc(ctx, src, size, extract.ExtractOptions{
+		Password: password,
+		Progress: func(done, total int) {
+			report(Progress{Stage: "reading", Done: done, Total: total})
+		},
+	})
 	if err != nil {
 		return Result{}, err
 	}
 
+	report(Progress{Stage: "laying out"})
 	document = normalize.Apply(document)
 	document = layout.Apply(document)
 	document = c.applyTables(document)
@@ -131,6 +171,7 @@ func (c *Converter) Run(ctx context.Context, src io.ReaderAt, size int64, doc Do
 	paras := render.GroupParagraphs(document.Body())
 	text := render.ParagraphText(paras)
 
+	report(Progress{Stage: "writing"})
 	book, err := render.Render(document, render.Options{DefaultTitle: titleFallback(doc.Name)})
 	if err != nil {
 		return Result{}, err
@@ -150,6 +191,7 @@ func (c *Converter) Run(ctx context.Context, src io.ReaderAt, size int64, doc Do
 
 	var validation *validate.Report
 	if c.opts.Validator != nil {
+		report(Progress{Stage: "validating"})
 		report, err := c.validate(ctx, buf.Bytes())
 		if err != nil {
 			return Result{}, err
@@ -162,6 +204,7 @@ func (c *Converter) Run(ctx context.Context, src io.ReaderAt, size int64, doc Do
 		}
 	}
 
+	report(Progress{Stage: "done", Done: document.PageCount(), Total: document.PageCount()})
 	return Result{
 		EPUB:       buf.Bytes(),
 		Pages:      document.PageCount(),
