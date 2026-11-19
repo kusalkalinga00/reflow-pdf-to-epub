@@ -136,7 +136,8 @@ flowchart LR
 ```
 
 The CLI and the web app drive the same `internal/convert` pipeline; nothing is duplicated for the
-server. PDFium is the only native dependency, reached through CGO and pkg-config.
+server. PDFium is the only native dependency, reached through CGO and pkg-config. The original
+design and the alternatives that were rejected are in [PROPOSAL.md](PROPOSAL.md).
 
 ---
 
