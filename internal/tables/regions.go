@@ -30,60 +30,310 @@ func BuildTables(rules []Rule, words []idm.Word, page idm.Page) []Table {
 
 	var out []Table
 	for _, reg := range regions(hRules) {
-		inside := wordsWithin(words, reg)
-		if len(inside) < 4 {
-			// A table needs at least a header row and one data row.
+		if t, ok := buildTable(words, reg); ok {
+			out = append(out, t)
 			continue
 		}
 
-		rows := clusterRows(inside)
-		cols := clusterColumns(inside)
-		if len(rows) < 2 || len(cols) < 2 {
-			continue
-		}
-
-		cells := placeWords(inside, rows, cols)
-
-		// A ruled box that also holds prose — the invoice's big frame carries
-		// an address block above its table — yields rows whose words sit in a
-		// single column. A real table row has content in at least two columns,
-		// so any such row means the region is a layout box, not a table.
-		tableLike := true
-		for _, row := range cells {
-			filled := 0
-			for _, cell := range row {
-				if cell != "" {
-					filled++
-				}
-			}
-			if filled < 2 {
-				tableLike = false
-				break
+		// A region that is not itself a table may still hold one: producers
+		// draw a big frame around a whole layout box and then rule the header
+		// of the table inside it. Interior rules subdivide the region, and
+		// each sub-region gets the same chance to be a table.
+		for _, sub := range subRegions(reg, hRules, words) {
+			if t, ok := buildTable(words, sub); ok {
+				out = append(out, t)
 			}
 		}
-		if !tableLike {
-			continue
-		}
-
-		t := Table{
-			Top:    reg.top,
-			Bottom: reg.bottom,
-			Left:   cols[0][0],
-			Right:  cols[len(cols)-1][1],
-			Cells:  cells,
-		}
-		out = append(out, t)
 	}
 
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Top > out[j].Top })
 	return out
 }
 
+// buildTable recovers one region's grid, applying the checks that keep
+// non-tables out.
+func buildTable(words []idm.Word, reg region) (Table, bool) {
+	inside := wordsWithin(words, reg)
+	if len(inside) < 4 {
+		// A table needs at least a header row and one data row.
+		return Table{}, false
+	}
+
+	rows := clusterRows(inside)
+	cols := clusterColumns(inside)
+	if len(rows) < 2 || len(cols) < 2 {
+		return Table{}, false
+	}
+
+	cells := placeWords(inside, rows, cols)
+
+	// A ruled box that also holds prose — the invoice's big frame carries an
+	// address block above its table — yields rows whose words sit in a single
+	// column. A real table row has content in at least two columns, so any
+	// such row means the region is a layout box, not a table.
+	for _, row := range cells {
+		filled := 0
+		for _, cell := range row {
+			if cell != "" {
+				filled++
+			}
+		}
+		if filled < 2 {
+			return Table{}, false
+		}
+	}
+
+	// A real table's rows share column boundaries: the words in row r start
+	// and end at (nearly) the same x as the words in row r+1. A wrapped title
+	// above a byline never does — "with Amazon EKS" and "Faisal Memon" are
+	// two visual columns that do not repeat — and emitting them as a table
+	// eats the slide's title.
+	if !columnsAlign(inside, rows) {
+		return Table{}, false
+	}
+
+	return Table{
+		Top:    reg.top,
+		Bottom: reg.bottom,
+		Left:   cols[0][0],
+		Right:  cols[len(cols)-1][1],
+		Cells:  cells,
+	}, true
+}
+
+// columnsAlign reports whether the rows form a consistent grid.
+//
+// A table's rows cluster into the same number of columns under the same x
+// separation, and start in the same place. Two centred lines — a wrapped
+// title over a byline — do not: their word gaps differ, so the rows cluster
+// into different column counts, and emitting them as a table eats the slide's
+// title.
+func columnsAlign(words []idm.Word, rows [][2]float64) bool {
+	var rowColumns []int
+	var leftmost []float64
+	for _, row := range rows {
+		rowWordsList := rowWords(words, row)
+		if len(rowWordsList) == 0 {
+			continue
+		}
+		rowColumns = append(rowColumns, columnCount(rowWordsList))
+		if centres := wordCentres(rowWordsList); len(centres) > 0 {
+			leftmost = append(leftmost, centres[0])
+		}
+	}
+	if len(rowColumns) < 2 {
+		return false
+	}
+
+	// Every row must itself cluster into at least two columns. A row that
+	// clusters as one — a byline whose words sit close together — means the
+	// region holds centred lines, not a grid. (Rows may differ in count: a
+	// wrapped cell adds a column to one row.)
+	for _, n := range rowColumns {
+		if n < 2 {
+			return false
+		}
+	}
+
+	// And the first column must line up.
+	const tolerance = 60
+	for _, v := range leftmost[1:] {
+		if math.Abs(v-leftmost[0]) > tolerance {
+			return false
+		}
+	}
+	return true
+}
+
+// wordCentres returns x centres in left-to-right order. Word lists arrive in
+// content-stream order, which is not reading order.
+func wordCentres(words []idm.Word) []float64 {
+	sorted := append([]idm.Word(nil), words...)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Box.X0 < sorted[j].Box.X0 })
+
+	out := make([]float64, len(sorted))
+	for i, w := range sorted {
+		out[i] = (w.Box.X0 + w.Box.X1) / 2
+	}
+	return out
+}
+
+// subRegions splits a non-table region where its content changes shape.
+//
+// Two signals, in order of trust:
+//
+//  1. Interior rules: a rule strictly inside the region, spanning most of its
+//     width, is a drawn boundary between two structures.
+//  2. Column consistency: a layout box that holds prose above a table shows a
+//     sharp change — prose rows fill one column, table rows fill several. The
+//     boundary is where the fill changes, and no rule needs to be drawn there
+//     (the invoice's table top is unruled).
+//
+// Both yield candidate sub-regions; the caller tests each with the same
+// table checks.
+func subRegions(reg region, hRules []Rule, words []idm.Word) []region {
+	var interior []float64
+	for _, r := range hRules {
+		if r.Y >= reg.top-2 || r.Y <= reg.bottom+2 {
+			continue
+		}
+		// Must overlap the region's x range substantially.
+		cover := math.Min(r.X1, reg.right) - math.Max(r.X0, reg.left)
+		if cover < (reg.right-reg.left)*0.5 {
+			continue
+		}
+		interior = append(interior, r.Y)
+	}
+
+	sort.Float64s(interior)
+
+	// Deduplicate doubled lines.
+	var distinct []float64
+	for _, y := range interior {
+		if len(distinct) == 0 || y-distinct[len(distinct)-1] > 2 {
+			distinct = append(distinct, y)
+		}
+	}
+
+	// Sub-regions run from each boundary down to the next. Top-down order.
+	bounds := append([]float64{reg.top}, distinct...)
+	bounds = append(bounds, reg.bottom)
+
+	var out []region
+	for i := 0; i < len(bounds)-1; i++ {
+		top, bottom := bounds[i], bounds[i+1]
+		if top-bottom < 12 {
+			// Too thin to hold a row.
+			continue
+		}
+		out = append(out, region{top: top, bottom: bottom, left: reg.left, right: reg.right})
+	}
+
+	// Content split: the boundary where rows stop filling one column and
+	// start filling several. Only applied when the rules drew no boundary —
+	// a single sub-region spanning the whole region is not a split.
+	if len(out) <= 1 {
+		if cut, ok := fillChange(words, reg); ok {
+			if reg.top-cut >= 12 && cut-reg.bottom >= 12 {
+				out = append(out,
+					region{top: reg.top, bottom: cut, left: reg.left, right: reg.right},
+					region{top: cut, bottom: reg.bottom, left: reg.left, right: reg.right},
+				)
+			}
+		}
+	}
+
+	return out
+}
+
+// fillChange finds where a region's rows change from filling one column to
+// filling several.
+//
+// A single two-column line is not a table (a date beside a company name reads
+// as two columns). The signal that holds is a RUN: three or more consecutive
+// rows with multiple columns, whose column positions repeat. The cut is the
+// top of that run.
+func fillChange(words []idm.Word, reg region) (float64, bool) {
+	inside := wordsWithin(words, reg)
+	if len(inside) < 6 {
+		return 0, false
+	}
+
+	rows := clusterRows(inside)
+	if len(rows) < 3 {
+		return 0, false
+	}
+
+	// Row index of the first row of the longest multi-column run.
+	//
+	// A row only counts as multi-column when its words also span most of the
+	// region's width: a title and a byline are two visual columns, but they
+	// sit in the left half of the slide, and turning them into a table eats
+	// the title. Real table rows reach across the region.
+	width := reg.right - reg.left
+	bestStart, bestLen := -1, 0
+	runStart := -1
+	for i := range rows {
+		rowWordsList := rowWords(inside, rows[i])
+		multi := columnCount(rowWordsList) >= 2 && rowSpan(rowWordsList) >= width*0.7
+		if multi {
+			if runStart < 0 {
+				runStart = i
+			}
+			if length := i - runStart + 1; length > bestLen {
+				bestStart, bestLen = runStart, length
+			}
+		} else {
+			runStart = -1
+		}
+	}
+
+	// A table needs a header row and at least two data rows.
+	if bestStart < 0 || bestLen < 3 {
+		return 0, false
+	}
+
+	// The run must not already start at the region's top: then the whole
+	// region is the table and the caller would have accepted it.
+	if bestStart == 0 {
+		return 0, false
+	}
+
+	// Cut between the row above the run and the run's first row.
+	above, first := rows[bestStart-1], rows[bestStart]
+	return (above[0] + first[1]) / 2, true
+}
+
+// rowSpan is the x distance from a row's first word to its last.
+func rowSpan(words []idm.Word) float64 {
+	if len(words) == 0 {
+		return 0
+	}
+	x0, x1 := words[0].Box.X0, words[0].Box.X1
+	for _, w := range words[1:] {
+		if w.Box.X0 < x0 {
+			x0 = w.Box.X0
+		}
+		if w.Box.X1 > x1 {
+			x1 = w.Box.X1
+		}
+	}
+	return x1 - x0
+}
+
+// rowWords returns the words whose baseline sits in the row band.
+func rowWords(words []idm.Word, row [2]float64) []idm.Word {
+	var out []idm.Word
+	for _, w := range words {
+		if w.Box.Y0 >= row[0]-1 && w.Box.Y0 <= row[1]+1 {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// columnCount clusters a row's words into columns by x separation.
+func columnCount(words []idm.Word) int {
+	if len(words) < 2 {
+		return len(words)
+	}
+	sorted := append([]idm.Word(nil), words...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Box.X0 < sorted[j].Box.X0 })
+
+	columns := 1
+	for i := 1; i < len(sorted); i++ {
+		if sorted[i].Box.X0 > sorted[i-1].Box.X1+18 {
+			columns++
+		}
+	}
+	return columns
+}
+
 // regions turns rule bands into areas that may contain a table.
 //
 // Bands come from the strict matcher, so a band of matching rules is the
-// frame of one structure. Doubled lines collapse to one boundary, and a
-// band that leaves fewer than two distinct boundaries is an underline.
+// frame of one structure. Doubled lines collapse to one boundary, and a band
+// that leaves fewer than two distinct boundaries is an underline.
 func regions(hRules []Rule) []region {
 	var out []region
 	for _, band := range bands(hRules) {
