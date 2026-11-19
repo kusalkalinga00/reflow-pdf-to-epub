@@ -1,0 +1,151 @@
+name: release
+
+# Tag a commit (git tag v0.2.0 && git push origin v0.2.0) and this publishes
+# the binary archives and the container image.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  MODULE: github.com/kusalkalinga00/tool-factory-epub-convertor
+
+jobs:
+  binaries:
+    name: ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Only hosted runners a private repository can use: Linux amd64,
+          # macOS amd64 and macOS arm64. Linux arm64 is covered by the image.
+          - { os: ubuntu-latest, goos: linux, goarch: amd64 }
+          - { os: macos-13, goos: darwin, goarch: amd64 }
+          - { os: macos-14, goos: darwin, goarch: arm64 }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install PDFium
+        run: |
+          ./scripts/pdfium.sh
+          echo "PKG_CONFIG_PATH=$PWD/.pdfium/lib/pkgconfig" >> "$GITHUB_ENV"
+
+      - name: Build and package
+        env:
+          CGO_ENABLED: '1'
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          case "${{ matrix.goos }}" in
+            linux)  rpath='$ORIGIN/lib' ;;
+            darwin) rpath='@loader_path/lib' ;;
+          esac
+
+          mkdir -p stage/lib
+          go build -trimpath \
+            -ldflags "-s -w -X ${MODULE}/internal/version.Version=${VERSION} -extldflags '-Wl,-rpath,${rpath}'" \
+            -o stage/reflow ./cmd/reflow
+
+          cp .pdfium/lib/libpdfium* stage/lib/
+          cp README.md stage/
+          if [ -f LICENSE ]; then cp LICENSE stage/; fi
+
+          name="reflow_${VERSION#v}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          tar czf "${name}.tar.gz" -C stage .
+          echo "ARCHIVE=${name}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Prove the archive runs without the build directory
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p unpacked
+          tar xzf "$ARCHIVE" -C unpacked
+
+          # Hide the build-time library and clear the loader paths: the
+          # bundled lib/ beside the binary is the only thing left to find.
+          mv .pdfium/lib .pdfium/lib.off
+          trap 'mv .pdfium/lib.off .pdfium/lib' EXIT
+          out="$(env -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH ./unpacked/reflow version)"
+          echo "$out"
+
+          case "$out" in
+            *"${VERSION#v}"*) ;;
+            *) echo "version output does not name $VERSION: $out" >&2; exit 1 ;;
+          esac
+
+      - name: Checksum
+        run: |
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
+          else
+            shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            *.tar.gz
+            *.sha256
+
+  publish:
+    name: publish release
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.sha256
+          generate_release_notes: true
+
+  image:
+    name: container image
+    needs: binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            VERSION=${{ github.ref_name }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ghcr.io/${{ github.repository }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
