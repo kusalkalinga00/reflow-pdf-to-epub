@@ -289,3 +289,29 @@ func TestMaskDigits(t *testing.T) {
 func pageNumberText(n int) string {
 	return string([]byte{byte('0' + n)})
 }
+
+func TestRightAlignedDatesStayWithTheirEntries(t *testing.T) {
+	// A résumé: one column of entries with a narrow, right-aligned date strip.
+	// The dates must not be swept to the end of the page as a second column.
+	doc := document(1,
+		block("Software Engineer", 1, 40, 700, 340, 712),
+		block("Sep 2020 – Jan 2022", 1, 480, 700, 555, 712),
+		block("LKLoop", 1, 40, 680, 340, 692),
+		block("Developed plugins", 1, 60, 660, 340, 672),
+		block("IT Consultant", 1, 40, 600, 340, 612),
+		block("Aug 2020 – Apr 2022", 1, 480, 600, 555, 612),
+		block("Cortex Institute", 1, 40, 580, 340, 592),
+	)
+
+	got := texts(Apply(doc).Blocks)
+	want := []string{
+		"Software Engineer", "Sep 2020 – Jan 2022",
+		"LKLoop", "Developed plugins",
+		"IT Consultant", "Aug 2020 – Apr 2022",
+		"Cortex Institute",
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("order = %v, want %v", got, want)
+	}
+}
