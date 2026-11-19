@@ -15,7 +15,7 @@ import (
 // piece of structure the reader actually notices: a book rendered as one
 // paragraph per line is technically readable and unpleasant to read.
 type Paragraph struct {
-	Kind     idm.Kind // KindParagraph or KindHeading
+	Kind     idm.Kind // KindParagraph, KindHeading or KindFigure
 	Level    int      // 1..3, headings only
 	Text     string
 	Page     int
@@ -23,6 +23,8 @@ type Paragraph struct {
 	FontSize float64
 	// Image is set for figures.
 	Image *idm.Image
+	// Table is set for recovered tables.
+	Table *idm.TableGrid
 }
 
 // GroupParagraphs merges line blocks into paragraphs and classifies headings.
@@ -41,6 +43,13 @@ func GroupParagraphs(blocks []idm.Block) []Paragraph {
 		if b.Kind == idm.KindFigure && b.Image != nil {
 			out = append(out, Paragraph{
 				Kind: idm.KindFigure, Page: b.Page, Box: b.BBox, Image: b.Image,
+			})
+			continue
+		}
+
+		if b.Kind == idm.KindTable && b.Table != nil {
+			out = append(out, Paragraph{
+				Kind: idm.KindTable, Page: b.Page, Box: b.BBox, Table: b.Table,
 			})
 			continue
 		}

@@ -271,6 +271,46 @@ func TestDocumentJSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestTableBlocksAreValidated(t *testing.T) {
+	base := validDocument()
+
+	t.Run("a rectangular grid passes", func(t *testing.T) {
+		doc := base
+		doc.Blocks = append(doc.Blocks, Block{
+			Kind: KindTable, Page: 2, BBox: Rect{X0: 45, Y0: 300, X1: 549, Y1: 680},
+			Table: &TableGrid{Cells: [][]string{
+				{"A", "B"}, {"C", "D"},
+			}},
+		})
+		if err := doc.Validate(); err != nil {
+			t.Errorf("Validate() = %v, want nil", err)
+		}
+	})
+
+	t.Run("a table block needs a grid", func(t *testing.T) {
+		doc := base
+		doc.Blocks = append(doc.Blocks, Block{
+			Kind: KindTable, Page: 2, BBox: Rect{X0: 45, Y0: 300, X1: 549, Y1: 680},
+		})
+		if err := doc.Validate(); err == nil {
+			t.Error("a table block without a grid was accepted")
+		}
+	})
+
+	t.Run("ragged rows are rejected", func(t *testing.T) {
+		doc := base
+		doc.Blocks = append(doc.Blocks, Block{
+			Kind: KindTable, Page: 2, BBox: Rect{X0: 45, Y0: 300, X1: 549, Y1: 680},
+			Table: &TableGrid{Cells: [][]string{
+				{"A", "B"}, {"C"},
+			}},
+		})
+		if err := doc.Validate(); err == nil {
+			t.Error("a ragged grid was accepted")
+		}
+	})
+}
+
 func TestKindIsFurniture(t *testing.T) {
 	for _, k := range []Kind{KindHeader, KindFooter} {
 		if !k.IsFurniture() {

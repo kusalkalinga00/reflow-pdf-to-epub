@@ -313,6 +313,27 @@ func TestSkippedImagesCostPoints(t *testing.T) {
 	}
 }
 
+func TestRecoveredTablesAreReported(t *testing.T) {
+	doc := document(2, 0.3, block(idm.KindParagraph, 1))
+	doc.Blocks = append(doc.Blocks, idm.Block{
+		Kind: idm.KindTable, Page: 1, Confidence: 1,
+		BBox:  idm.Rect{X0: 45, Y0: 300, X1: 549, Y1: 680},
+		Table: &idm.TableGrid{Cells: [][]string{{"A", "B"}, {"C", "D"}}},
+	})
+
+	report := score.Evaluate(doc, paragraphs(), []string{"Chapter One"})
+
+	if report.Signals.RecoveredTables != 1 {
+		t.Fatalf("recovered = %d, want 1", report.Signals.RecoveredTables)
+	}
+	if report.Score != 100 {
+		t.Errorf("score = %d, want 100: recovering a table is good", report.Score)
+	}
+	if !hasIssue(report, "TABLES_RECOVERED") {
+		t.Errorf("issues = %v, want TABLES_RECOVERED", report.Issues)
+	}
+}
+
 func TestSummaryMatchesTier(t *testing.T) {
 	structured := score.Evaluate(document(1, 0.3, block(idm.KindParagraph, 1)), paragraphs(), []string{"Chapter One"})
 	if !strings.Contains(structured.Summary, "Structured") {

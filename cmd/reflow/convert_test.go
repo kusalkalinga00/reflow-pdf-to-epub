@@ -199,3 +199,68 @@ func TestConvertPutsColumnsInReadingOrder(t *testing.T) {
 		t.Errorf("right column text appears before the end of the left column:\n%s", chapter)
 	}
 }
+
+func TestConvertRecoversRuledTables(t *testing.T) {
+	// A frame-ruled table: rules above and below, the words carrying the
+	// grid. What the real invoice taught, committed as a fixture.
+	pdf := testpdf.Build(1,
+		testpdf.WithPages([]testpdf.Line{
+			{Text: "Date", Size: 12, X: 72, Y: 660},
+			{Text: "Task", Size: 12, X: 200, Y: 660},
+			{Text: "Hours", Size: 12, X: 320, Y: 660},
+			{Text: "Total", Size: 12, X: 450, Y: 660},
+			{Text: "8 Oct", Size: 12, X: 72, Y: 620},
+			{Text: "Meeting", Size: 12, X: 200, Y: 620},
+			{Text: "1", Size: 12, X: 320, Y: 620},
+			{Text: "1,500.00", Size: 12, X: 450, Y: 620},
+		}),
+		testpdf.WithRules(
+			testpdf.LineRule{X0: 45, Y0: 680, X1: 549, Y1: 680},
+			testpdf.LineRule{X0: 45, Y0: 600, X1: 549, Y1: 600},
+		),
+	)
+
+	dir := t.TempDir()
+	in := filepath.Join(dir, "table.pdf")
+	if err := os.WriteFile(in, pdf, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "table.epub")
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"convert", "-q", "-o", out, in}, &stdout, &stderr); code != exitOK {
+		t.Fatalf("exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	zr, err := zip.OpenReader(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zr.Close()
+
+	var chapter string
+	for _, f := range zr.File {
+		if f.Name == "OEBPS/text/chapter-001.xhtml" {
+			rc, _ := f.Open()
+			body, _ := io.ReadAll(rc)
+			rc.Close()
+			chapter = string(body)
+		}
+	}
+	if chapter == "" {
+		t.Fatal("chapter not found")
+	}
+
+	if !strings.Contains(chapter, "<table>") {
+		t.Fatalf("no table in the output:\n%s", chapter)
+	}
+	for _, want := range []string{"<td>Date</td>", "<td>Meeting</td>", "<td>1,500.00</td>"} {
+		if !strings.Contains(chapter, want) {
+			t.Errorf("table is missing %q:\n%s", want, chapter)
+		}
+	}
+	// The words were absorbed into the grid, not duplicated as paragraphs.
+	if strings.Contains(chapter, "<p>Meeting</p>") {
+		t.Errorf("table text also emitted as a paragraph:\n%s", chapter)
+	}
+}

@@ -56,6 +56,7 @@ type Signals struct {
 	LowConfidence   int     `json:"lowConfidenceBlocks"`
 	OCRedPages      int     `json:"ocrPages"`
 	OutlineEntries  int     `json:"outlineEntries"`
+	RecoveredTables int     `json:"recoveredTables"`
 	Tables          int     `json:"tables"`
 	Figures         int     `json:"figures"`
 	FiguresEmbedded int     `json:"figuresEmbedded"`
@@ -140,6 +141,14 @@ func Evaluate(doc idm.Document, paras []render.Paragraph, chapters []string) Rep
 			s.ImagesSkipped, plural(s.ImagesSkipped))
 	}
 
+	if s.RecoveredTables > 0 {
+		r.Issues = append(r.Issues, Issue{
+			Severity: SeverityInfo,
+			Code:     "TABLES_RECOVERED",
+			Message:  fmt.Sprintf("Recovered %d ruled table%s as real grids.", s.RecoveredTables, plural(s.RecoveredTables)),
+		})
+	}
+
 	if s.OCRedPages > 0 {
 		r.Issues = append(r.Issues, Issue{
 			Severity: SeverityInfo,
@@ -186,6 +195,8 @@ func gather(doc idm.Document, paras []render.Paragraph, chapters []string) Signa
 
 	for _, b := range doc.Blocks {
 		switch {
+		case b.Kind == idm.KindTable:
+			s.RecoveredTables++
 		case b.Kind.IsFurniture():
 			s.Furniture++
 		case b.Confidence < 0.6:

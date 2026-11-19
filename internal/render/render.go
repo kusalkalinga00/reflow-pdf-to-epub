@@ -388,6 +388,8 @@ func chapterXHTML(ch chapter, assets *assets) (string, []int) {
 		switch {
 		case p.Kind == idm.KindHeading:
 			fmt.Fprintf(&b, "<h%d>%s</h%d>\n", p.Level, escape(p.Text), p.Level)
+		case p.Kind == idm.KindTable && p.Table != nil:
+			b.WriteString(tableXHTML(p.Table))
 		case p.Kind == idm.KindFigure && p.Image != nil:
 			fmt.Fprintf(&b, "<figure><img src=\"../images/%s\" alt=\"\"/></figure>\n", assets.add(p.Image))
 		case p.Kind == idm.KindFigure:
@@ -422,6 +424,23 @@ func languageOf(doc idm.Document) string {
 
 // escape makes text safe for XHTML. encoding/xml also replaces invalid runes,
 // which PDF text extraction does occasionally produce.
+// tableXHTML renders a recovered grid. Header detection is left to the
+// reading system: a plain grid with first-row scope is the honest markup for
+// a table whose header row we did not verify.
+func tableXHTML(grid *idm.TableGrid) string {
+	var b strings.Builder
+	b.WriteString("<table>\n")
+	for _, row := range grid.Cells {
+		b.WriteString("<tr>")
+		for _, cell := range row {
+			fmt.Fprintf(&b, "<td>%s</td>", escape(cell))
+		}
+		b.WriteString("</tr>\n")
+	}
+	b.WriteString("</table>\n")
+	return b.String()
+}
+
 func escape(s string) string {
 	var b strings.Builder
 	if err := xml.EscapeText(&b, []byte(s)); err != nil {

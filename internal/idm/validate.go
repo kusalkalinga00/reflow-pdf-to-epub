@@ -159,8 +159,29 @@ func (d Document) Validate() error {
 			add(path+".image.mediaType", "must be set when image data is present")
 		}
 
-		// Figures may be image-only. Every other kind must carry text.
-		if strings.TrimSpace(block.Text) == "" && block.Kind != KindFigure {
+		if block.Kind == KindTable {
+			if block.Table == nil {
+				add(path+".table", "a table block needs a grid")
+			} else {
+				width := -1
+				for r, row := range block.Table.Cells {
+					if len(row) == 0 {
+						add(fmt.Sprintf("%s.table.cells[%d]", path, r), "must not be empty")
+						continue
+					}
+					if width == -1 {
+						width = len(row)
+					} else if len(row) != width {
+						add(fmt.Sprintf("%s.table.cells[%d]", path, r),
+							"rows must have the same number of columns: got %d, want %d", len(row), width)
+					}
+				}
+			}
+		}
+
+		// Figures may be image-only; tables carry their text in the grid.
+		// Every other kind must carry text.
+		if strings.TrimSpace(block.Text) == "" && block.Kind != KindFigure && block.Kind != KindTable {
 			add(path+".text", "must not be empty for kind %q", block.Kind)
 		}
 
