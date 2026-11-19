@@ -454,3 +454,162 @@ func TestRenderDefaultsLanguage(t *testing.T) {
 		t.Errorf("language = %q, want en", book.Metadata.Language)
 	}
 }
+
+func TestRenderNestsOutlineSectionsInsideTheirChapter(t *testing.T) {
+	doc := document([]idm.Block{
+		line("Opening text.", 1, 700, 710, 10),
+		line("Section one body.", 1, 620, 630, 10),
+		line("Section two body.", 1, 400, 410, 10),
+		line("Second chapter body.", 2, 700, 710, 10),
+	}, 2)
+	doc.Outline = []idm.OutlineEntry{
+		{Title: "Chapter One", Page: 1, Level: 1, Y: 720},
+		{Title: "Section One", Page: 1, Level: 2, Y: 650},
+		{Title: "Section Two", Page: 1, Level: 2, Y: 430},
+		{Title: "Chapter Two", Page: 2, Level: 1, Y: 720},
+	}
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	if got, want := chapterTitlesOf(book), []string{"Chapter One", "Chapter Two"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("chapters = %v, want %v", got, want)
+	}
+
+	// The sections are navigation entries, not chapters.
+	sections := book.Chapters[0].Sections
+	if len(sections) != 2 {
+		t.Fatalf("first chapter has %d sections, want 2", len(sections))
+	}
+	if got, want := sections[0].Title, "Section One"; got != want {
+		t.Errorf("section 0 title = %q, want %q", got, want)
+	}
+	if got, want := sections[0].Href, "text/chapter-001.xhtml#sec-01"; got != want {
+		t.Errorf("section 0 href = %q, want %q", got, want)
+	}
+	if len(book.Chapters[1].Sections) != 0 {
+		t.Errorf("second chapter has %d sections, want 0", len(book.Chapters[1].Sections))
+	}
+}
+
+func TestRenderPlacesSectionAnchorsBeforeTheirParagraphs(t *testing.T) {
+	doc := document([]idm.Block{
+		line("Opening text.", 1, 700, 710, 10),
+		line("Section one body.", 1, 620, 630, 10),
+		line("Section two body.", 1, 400, 410, 10),
+		line("Second chapter body.", 2, 700, 710, 10),
+	}, 2)
+	doc.Outline = []idm.OutlineEntry{
+		{Title: "Chapter One", Page: 1, Level: 1, Y: 720},
+		{Title: "Section One", Page: 1, Level: 2, Y: 650},
+		{Title: "Section Two", Page: 1, Level: 2, Y: 430},
+		{Title: "Chapter Two", Page: 2, Level: 1, Y: 720},
+	}
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	body := book.Chapters[0].Body
+	one := strings.Index(body, `id="sec-01"`)
+	two := strings.Index(body, `id="sec-02"`)
+	if one < 0 || two < 0 {
+		t.Fatalf("section anchors missing:\n%s", body)
+	}
+	if one > two {
+		t.Errorf("section anchors out of reading order: sec-01 at %d, sec-02 at %d", one, two)
+	}
+	if got, want := strings.Index(body, "Section one body."), one; got < want {
+		t.Errorf("sec-01 emitted after its paragraph (anchor %d, paragraph %d)", one, got)
+	}
+	if got, want := strings.Index(body, "Section two body."), two; got < want {
+		t.Errorf("sec-02 emitted after its paragraph (anchor %d, paragraph %d)", two, got)
+	}
+	if strings.Index(body, "Opening text.") > one {
+		t.Error("sec-01 emitted before the chapter's opening paragraph")
+	}
+}
+
+func TestRenderAnchorsAPositionlessSectionAtItsPageTop(t *testing.T) {
+	doc := document([]idm.Block{
+		line("First page text.", 1, 700, 710, 10),
+		line("Second page text.", 2, 700, 710, 10),
+	}, 2)
+	doc.Outline = []idm.OutlineEntry{
+		{Title: "Chapter One", Page: 1, Level: 1, Y: 720},
+		{Title: "Chapter Two", Page: 2, Level: 1, Y: 720},
+		{Title: "Bookmarked Subsection", Page: 2, Level: 2},
+	}
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	body := book.Chapters[1].Body
+	anchor := strings.Index(body, `id="sec-01"`)
+	text := strings.Index(body, "Second page text.")
+	if anchor < 0 || text < 0 {
+		t.Fatalf("anchor or paragraph missing:\n%s", body)
+	}
+	if anchor > text {
+		t.Errorf("positionless section anchor emitted after its page's first paragraph (anchor %d, text %d)", anchor, text)
+	}
+}
+
+func TestPositionlessSectionsFollowTheirOutlineNeighbour(t *testing.T) {
+	// The CV's outline carries no positions at all: every bookmark is
+	// "page 1, top". Sections must still land under the chapter the outline
+	// puts them after, not under whichever chapter starts at the page top.
+	doc := document([]idm.Block{
+		line("KUSAL KALINGA", 1, 780, 790, 14),
+		line("Senior Software Engineer", 1, 750, 760, 12),
+		line("PROFESSIONAL SUMMARY", 1, 700, 710, 12),
+		line("EDUCATION", 1, 650, 660, 12),
+		line("BEng (Hons) in Software Engineering", 1, 620, 630, 10),
+		line("SKILLS", 1, 580, 590, 12),
+		line("WORK EXPERIENCE", 1, 540, 550, 12),
+		line("Software Engineer (Fullstack)", 1, 510, 520, 10),
+	}, 1)
+	doc.Outline = []idm.OutlineEntry{
+		{Title: "KUSAL KALINGA", Page: 1, Level: 1},
+		{Title: "Senior Software Engineer", Page: 1, Level: 2},
+		{Title: "PROFESSIONAL SUMMARY", Page: 1, Level: 2},
+		{Title: "EDUCATION", Page: 1, Level: 2},
+		{Title: "BEng (Hons) in Software Engineering", Page: 1, Level: 3},
+		{Title: "SKILLS", Page: 1, Level: 2},
+		{Title: "WORK EXPERIENCE", Page: 1, Level: 2},
+		{Title: "Software Engineer (Fullstack)", Page: 1, Level: 3},
+	}
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	byTitle := map[string]int{}
+	for i, c := range book.Chapters {
+		byTitle[c.Title] = i
+	}
+
+	education := book.Chapters[byTitle["EDUCATION"]]
+	if len(education.Sections) != 1 || education.Sections[0].Title != "BEng (Hons) in Software Engineering" {
+		t.Fatalf("EDUCATION sections = %+v, want the BEng entry", education.Sections)
+	}
+
+	work := book.Chapters[byTitle["WORK EXPERIENCE"]]
+	if len(work.Sections) != 1 || work.Sections[0].Title != "Software Engineer (Fullstack)" {
+		t.Fatalf("WORK EXPERIENCE sections = %+v, want the role entry", work.Sections)
+	}
+
+	// The anchor must sit inside the chapter body, before the matched text.
+	body := education.Body
+	anchor := strings.Index(body, `id="sec-01"`)
+	text := strings.Index(body, "BEng (Hons) in Software Engineering")
+	if anchor < 0 || text < 0 || anchor > text {
+		t.Errorf("BEng anchor misplaced (anchor %d, text %d):\n%s", anchor, text, body)
+	}
+}

@@ -155,6 +155,27 @@ type Chapter struct {
 	// document. The writer wraps it, links the stylesheet, and rejects it if
 	// it is not well-formed XML.
 	Body string
+	// Sections are nested navigation entries that point inside this chapter.
+	// They do not own a file: each Href carries a fragment identifying an
+	// anchor in Body. Nesting them shows the document's real depth without
+	// inventing chapter files for every subsection.
+	Sections []Section
+}
+
+// Section is a nested navigation entry inside a chapter.
+//
+// Section.Level is the outline depth the entry came from. Entries keep their
+// nesting relative to each other: an entry one level deeper than the previous
+// one becomes its child in the navigation.
+type Section struct {
+	// Title is the navigation label.
+	Title string
+	// Href points at an anchor in the owning chapter, for example
+	// "text/chapter-003.xhtml#sec-01".
+	Href string
+	// Level is the entry's depth in the document's outline. Zero is treated
+	// as the same level as the first section in its chapter.
+	Level int
 }
 
 // PageTarget maps a printed page label to a location in the book. This is what
@@ -204,6 +225,7 @@ type chapter struct {
 	title    string
 	filename string // relative to the package document
 	body     string
+	sections []Section
 }
 
 type coverAsset struct {
@@ -263,6 +285,7 @@ func prepare(book Book) (*prepared, error) {
 			title:    title,
 			filename: fmt.Sprintf("text/chapter-%03d.xhtml", i+1),
 			body:     ch.Body,
+			sections: ch.Sections,
 		})
 	}
 
@@ -289,6 +312,27 @@ func prepare(book Book) (*prepared, error) {
 		}
 		if !strings.Contains(body, `id="`+fragment+`"`) {
 			return nil, fmt.Errorf("%w: pageList[%d] points at missing anchor %q in %s", ErrInvalidBook, i, fragment, file)
+		}
+	}
+
+	// A section must point at an anchor that exists. A nav entry with a dead
+	// fragment is a broken link, and epubcheck rejects it as RSC-012.
+	for ci, ch := range b.chapters {
+		for si, sec := range ch.sections {
+			if strings.TrimSpace(sec.Title) == "" || strings.TrimSpace(sec.Href) == "" {
+				return nil, fmt.Errorf("%w: chapter %d section %d needs both a title and an href", ErrInvalidBook, ci+1, si+1)
+			}
+
+			file, fragment, hasFragment := strings.Cut(sec.Href, "#")
+			if !hasFragment || fragment == "" {
+				return nil, fmt.Errorf("%w: chapter %d section %d href %q has no fragment", ErrInvalidBook, ci+1, si+1, sec.Href)
+			}
+			if file != ch.filename {
+				return nil, fmt.Errorf("%w: chapter %d section %d points at %s, not its own %s", ErrInvalidBook, ci+1, si+1, file, ch.filename)
+			}
+			if !strings.Contains(ch.body, `id="`+fragment+`"`) {
+				return nil, fmt.Errorf("%w: chapter %d section %d points at missing anchor %q", ErrInvalidBook, ci+1, si+1, fragment)
+			}
 		}
 	}
 

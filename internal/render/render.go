@@ -58,14 +58,16 @@ func Render(doc idm.Document, opts Options) (epub.Book, error) {
 	for i, ch := range chapters {
 		body, pages := chapterXHTML(ch, assets)
 
+		// The writer names chapter files by position, so the page list and
+		// the nested section links can compute the same path here.
+		filename := fmt.Sprintf("text/chapter-%03d.xhtml", i+1)
+
 		book.Chapters = append(book.Chapters, epub.Chapter{
-			Title: ch.title,
-			Body:  body,
+			Title:    ch.title,
+			Body:     body,
+			Sections: sectionLinks(ch.sections, filename),
 		})
 
-		// The writer names chapter files by position, so the page list can
-		// compute the same path here.
-		filename := fmt.Sprintf("text/chapter-%03d.xhtml", i+1)
 		for _, page := range pages {
 			book.PageList = append(book.PageList, epub.PageTarget{
 				Label: strconv.Itoa(page),
@@ -124,6 +126,18 @@ type chapter struct {
 	// bookmark has no position, meaning the chapter starts at the page top.
 	startY float64
 	paras  []Paragraph
+	// sections are the nested outline entries inside this chapter, in order.
+	sections []section
+}
+
+// section is a nested outline entry: it points inside the chapter rather than
+// owning a file, which is what an EPUB nav allows.
+type section struct {
+	title     string
+	anchor    string
+	level     int
+	startPage int
+	startY    float64
 }
 
 // buildChapters splits at the highest heading level present, falling back to a
@@ -179,6 +193,7 @@ func chaptersFromOutline(paras []Paragraph, outline []idm.OutlineEntry) []chapte
 	}
 
 	locateUnpositioned(chapters, paras)
+	assignSections(chapters, outline, starts, paras)
 
 	// A paragraph belongs to the last chapter that starts at or before it. The
 	// comparison is by position, not just page, because sections routinely
@@ -218,6 +233,142 @@ func chaptersFromOutline(paras []Paragraph, outline []idm.OutlineEntry) []chapte
 
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+// assignSections attaches outline entries below the chapter level to the
+// chapter they fall inside, as nested sections.
+//
+// Sections do not own files: they are anchors inside the chapter's XHTML, and
+// nesting them in the navigation is how a reader sees the document's real
+// depth. The LLM book carries 109 outline entries in 16 chapters; without
+// sections, 93 of them were invisible.
+func assignSections(chapters []chapter, outline []idm.OutlineEntry, starts []idm.OutlineEntry, paras []Paragraph) {
+	chapterLevel := starts[0].Level
+
+	// Chapter positions by title, consumed in outline order. A bookmark with
+	// no position — the CV's whole outline is like this — is placed by
+	// locating its title in the text, exactly as chapters are. Without that,
+	// every positionless section lands at the top of its page and collects
+	// under whichever chapter happens to start there.
+	available := map[string][]position{}
+	for _, c := range chapters {
+		available[c.title] = append(available[c.title], position{page: c.startPage, y: c.startY})
+	}
+
+	prevPage, prevY := 0, math.Inf(1)
+
+	for _, e := range outline {
+		if e.Page <= 0 {
+			continue
+		}
+
+		located := e
+		switch {
+		case e.Y > 0:
+			// The bookmark carries its own position.
+		case e.Level <= chapterLevel:
+			if positions := available[e.Title]; len(positions) > 0 {
+				located.Page, located.Y = positions[0].page, positions[0].y
+				available[e.Title] = positions[1:]
+			} else if page, y, ok := findTitle(paras, e.Title, prevPage, prevY); ok {
+				located.Page, located.Y = page, y
+			} else if prevPage > 0 {
+				located.Page, located.Y = prevPage, prevY
+			}
+		default:
+			if page, y, ok := findTitle(paras, e.Title, prevPage, prevY); ok {
+				located.Page, located.Y = page, y
+			} else if prevPage > 0 {
+				// A title that extraction split across lines ("Level 5
+				// Pearson BTEC HND in Computing" is wrapped in the CV) cannot
+				// be matched as one paragraph. It still belongs with the
+				// entry before it, which is where the outline put it.
+				located.Page, located.Y = prevPage, prevY
+			}
+		}
+
+		prevPage, prevY = located.Page, startY(located)
+
+		if e.Level <= chapterLevel {
+			continue
+		}
+
+		owner := sectionOwner(chapters, located)
+		if owner < 0 {
+			continue
+		}
+
+		chapters[owner].sections = append(chapters[owner].sections, section{
+			title:     e.Title,
+			anchor:    sectionAnchor(len(chapters[owner].sections) + 1),
+			level:     e.Level,
+			startPage: located.Page,
+			startY:    startY(located),
+		})
+	}
+}
+
+// position is a located place in the text.
+type position struct {
+	page int
+	y    float64
+}
+
+// sectionOwner finds the chapter a nested entry belongs to.
+//
+// An entry with a position belongs to the last chapter that starts at or
+// before it. An entry without a position marks its page's top, which is the
+// first chapter starting on that page — not the last one, which starts lower
+// down. A positionless entry on a page with no chapter of its own belongs to
+// the last chapter that started before it.
+func sectionOwner(chapters []chapter, e idm.OutlineEntry) int {
+	if math.IsInf(startY(e), 1) {
+		for i, c := range chapters {
+			if c.startPage == e.Page {
+				return i
+			}
+		}
+		for i := len(chapters) - 1; i >= 0; i-- {
+			if chapters[i].startPage < e.Page {
+				return i
+			}
+		}
+		return -1
+	}
+
+	for i := len(chapters) - 1; i >= 0; i-- {
+		c := chapters[i]
+		if e.Page > c.startPage || (e.Page == c.startPage && startY(e) <= c.startY+2) {
+			return i
+		}
+	}
+	return -1
+}
+
+// sectionAnchor is a stable id for a section within its chapter.
+func sectionAnchor(n int) string { return fmt.Sprintf("sec-%02d", n) }
+
+// sectionAnchorHTML emits the anchor element at the position a section begins.
+// It is inserted before the first paragraph at or below the section start.
+func sectionAnchorHTML(sec section) string {
+	return fmt.Sprintf(`<span id="%s"></span>`, sec.anchor)
+}
+
+// sectionLinks turns a chapter's sections into navigation entries. The href
+// points inside the chapter file, which is where the anchor was emitted.
+func sectionLinks(sections []section, filename string) []epub.Section {
+	if len(sections) == 0 {
+		return nil
+	}
+	out := make([]epub.Section, len(sections))
+	for i, sec := range sections {
+		out[i] = epub.Section{
+			Title: sec.title,
+			Href:  filename + "#" + sec.anchor,
+			Level: sec.level,
+		}
 	}
 	return out
 }
@@ -375,7 +526,25 @@ func chapterXHTML(ch chapter, assets *assets) (string, []int) {
 		lastPage int
 	)
 
+	// Sections are emitted in reading order: page ascending, and top of page
+	// first within a page. A section without a position starts at its page's
+	// top, which is the paragraph order's first match.
+	sections := append([]section(nil), ch.sections...)
+	sort.SliceStable(sections, func(i, j int) bool {
+		if sections[i].startPage != sections[j].startPage {
+			return sections[i].startPage < sections[j].startPage
+		}
+		return sections[i].startY > sections[j].startY
+	})
+	next := 0
+
 	for _, p := range ch.paras {
+		for next < len(sections) && sectionStartsAt(sections[next], p) {
+			b.WriteString(sectionAnchorHTML(sections[next]))
+			b.WriteByte('\n')
+			next++
+		}
+
 		if p.Page != lastPage {
 			// The anchor is empty so it does not disturb the flow, but it
 			// carries the printed page number for the page list.
@@ -399,7 +568,23 @@ func chapterXHTML(ch chapter, assets *assets) (string, []int) {
 		}
 	}
 
+	// A section whose page holds no paragraph still needs its anchor, or the
+	// navigation link would dangle and the writer would reject the book.
+	for ; next < len(sections); next++ {
+		b.WriteString(sectionAnchorHTML(sections[next]))
+		b.WriteByte('\n')
+	}
+
 	return b.String(), pages
+}
+
+// sectionStartsAt reports whether a paragraph is the first one at or after the
+// section's position. Positionless sections start at their page's top.
+func sectionStartsAt(sec section, p Paragraph) bool {
+	if p.Page > sec.startPage {
+		return true
+	}
+	return p.Page == sec.startPage && p.Box.Y1 <= sec.startY+2
 }
 
 func titleOf(doc idm.Document, opts Options) string {
