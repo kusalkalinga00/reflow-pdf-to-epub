@@ -14,9 +14,11 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ingest"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/score"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/testpdf"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/web"
 )
@@ -386,5 +388,224 @@ func TestWrongPasswordSaysItDidNotOpen(t *testing.T) {
 	}
 	if !strings.Contains(payload.Error, "did not open") {
 		t.Errorf("error = %q, want it to say the password did not open the file", payload.Error)
+	}
+}
+
+// progressConverter reports one page and then waits, so a test can observe a
+// job while it is running.
+type progressConverter struct {
+	started chan struct{}
+	release chan struct{}
+	result  convert.Result
+}
+
+func (p *progressConverter) Run(ctx context.Context, _ io.ReaderAt, _ int64, doc convert.DocOptions) (convert.Result, error) {
+	if doc.Progress != nil {
+		doc.Progress(convert.Progress{Stage: "reading", Done: 1, Total: 2})
+	}
+	close(p.started)
+	select {
+	case <-p.release:
+		return p.result, nil
+	case <-ctx.Done():
+		return convert.Result{}, ctx.Err()
+	}
+}
+
+type jobPoll struct {
+	ID       string `json:"id"`
+	State    string `json:"state"`
+	Stage    string `json:"stage"`
+	Done     int    `json:"done"`
+	Total    int    `json:"total"`
+	Pages    int    `json:"pages"`
+	Chapters int    `json:"chapters"`
+	Error    string `json:"error"`
+	Code     string `json:"code"`
+	Quality  struct {
+		Score int `json:"score"`
+	} `json:"quality"`
+}
+
+func postJob(t *testing.T, srv *httptest.Server, data []byte, password string) jobPoll {
+	t.Helper()
+
+	body, contentType := uploadWithPassword(t, "book.pdf", data, password)
+	resp, err := http.Post(srv.URL+"/api/jobs", contentType, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
+	}
+
+	var started jobPoll
+	if err := json.NewDecoder(resp.Body).Decode(&started); err != nil {
+		t.Fatalf("decode start response: %v", err)
+	}
+	if started.ID == "" {
+		t.Fatal("job has no id")
+	}
+	return started
+}
+
+func waitForJob(t *testing.T, srv *httptest.Server, id, want string) jobPoll {
+	t.Helper()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(srv.URL + "/api/jobs/" + id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var state jobPoll
+		decodeErr := json.NewDecoder(resp.Body).Decode(&state)
+		resp.Body.Close()
+		if decodeErr != nil {
+			t.Fatalf("decode status: %v", decodeErr)
+		}
+		if state.State == want {
+			return state
+		}
+		if state.State == "error" && want != "error" {
+			t.Fatalf("job failed: %s (%s)", state.Error, state.Code)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("job %s never reached state %q", id, want)
+	return jobPoll{}
+}
+
+func TestJobRunsToCompletionAndServesTheEPUB(t *testing.T) {
+	srv := newServer(t, web.Options{})
+
+	started := postJob(t, srv, testpdf.Build(2), "")
+
+	done := waitForJob(t, srv, started.ID, "done")
+	if done.Pages != 2 {
+		t.Errorf("pages = %d, want 2", done.Pages)
+	}
+	if done.Chapters == 0 {
+		t.Error("no chapters reported")
+	}
+	if done.Quality.Score <= 0 {
+		t.Errorf("score = %d, want a measured score", done.Quality.Score)
+	}
+
+	resp, err := http.Get(srv.URL + "/api/jobs/" + started.ID + "/epub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("epub status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "application/epub+zip" {
+		t.Errorf("content type = %q", got)
+	}
+
+	book, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(book, []byte("PK")) {
+		t.Errorf("epub does not start with a ZIP signature: %q", book[:min(8, len(book))])
+	}
+}
+
+func TestJobReportsLiveProgress(t *testing.T) {
+	stub := &progressConverter{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+		result: convert.Result{
+			EPUB:     []byte("epub"),
+			Pages:    2,
+			Chapters: []string{"One"},
+			Quality:  score.Report{Score: 90, Tier: score.TierStructured},
+		},
+	}
+	srv := httptest.NewServer(web.New(stub, web.Options{}).Handler())
+	defer srv.Close()
+
+	started := postJob(t, srv, testpdf.Build(1), "")
+
+	select {
+	case <-stub.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("converter never started")
+	}
+
+	state := waitForJob(t, srv, started.ID, "running")
+	if state.Stage != "reading" || state.Done != 1 || state.Total != 2 {
+		t.Errorf("progress = %+v, want reading 1/2", state)
+	}
+
+	// The book is not downloadable while the job is still running.
+	resp, err := http.Get(srv.URL + "/api/jobs/" + started.ID + "/epub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("early epub status = %d, want 409", resp.StatusCode)
+	}
+
+	close(stub.release)
+	waitForJob(t, srv, started.ID, "done")
+}
+
+func TestJobCanBeCanceled(t *testing.T) {
+	stub := &progressConverter{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	srv := httptest.NewServer(web.New(stub, web.Options{}).Handler())
+	defer srv.Close()
+
+	started := postJob(t, srv, testpdf.Build(1), "")
+	select {
+	case <-stub.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("converter never started")
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, srv.URL+"/api/jobs/"+started.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("cancel status = %d, want 204", resp.StatusCode)
+	}
+
+	// The job is gone from the store.
+	resp, err = http.Get(srv.URL + "/api/jobs/" + started.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status after cancel = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestUnknownJobIsNotFound(t *testing.T) {
+	srv := newServer(t, web.Options{})
+
+	resp, err := http.Get(srv.URL + "/api/jobs/nope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
 }
