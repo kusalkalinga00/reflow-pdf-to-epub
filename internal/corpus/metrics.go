@@ -54,6 +54,18 @@ func WordErrorRate(want, got string) float64 {
 	return float64(editDistance(expected, words(got))) / float64(len(expected))
 }
 
+// dashVariants maps the dash glyphs PDF producers mix through to the plain
+// hyphen. A dash's glyph choice is typography, not a different word: "Jun
+// 2026 – Present" and "Jun 2026 - Present" are the same words.
+var dashVariants = strings.NewReplacer(
+	"\u2010", "-",
+	"\u2011", "-",
+	"\u2012", "-",
+	"\u2013", "-",
+	"\u2014", "-",
+	"\u2015", "-",
+)
+
 // words tokenises for comparison, not for display.
 //
 // Spacing around punctuation is typography, not a different word: "Next.js ,"
@@ -62,7 +74,7 @@ func WordErrorRate(want, got string) float64 {
 // too. Word order still counts, which is the point of the metric.
 func words(s string) []string {
 	var out []string
-	for _, token := range strings.Fields(strings.ToLower(s)) {
+	for _, token := range strings.Fields(dashVariants.Replace(strings.ToLower(s))) {
 		if n := len(out); n > 0 && (punctOnly(token) || endsWithApostrophe(out[n-1])) {
 			out[n-1] += token
 			continue
