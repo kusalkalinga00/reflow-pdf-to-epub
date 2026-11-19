@@ -54,8 +54,38 @@ func WordErrorRate(want, got string) float64 {
 	return float64(editDistance(expected, words(got))) / float64(len(expected))
 }
 
+// words tokenises for comparison, not for display.
+//
+// Spacing around punctuation is typography, not a different word: "Next.js ,"
+// and "Next.js," must not count as an error. Punctuation-only tokens join the
+// word before them, and an apostrophe split from its word ("I' m") joins it
+// too. Word order still counts, which is the point of the metric.
 func words(s string) []string {
-	return strings.Fields(strings.ToLower(s))
+	var out []string
+	for _, token := range strings.Fields(strings.ToLower(s)) {
+		if n := len(out); n > 0 && (punctOnly(token) || endsWithApostrophe(out[n-1])) {
+			out[n-1] += token
+			continue
+		}
+		out = append(out, token)
+	}
+	return out
+}
+
+func endsWithApostrophe(s string) bool {
+	return strings.HasSuffix(s, "'") || strings.HasSuffix(s, "\u2019")
+}
+
+func punctOnly(token string) bool {
+	if token == "" {
+		return false
+	}
+	for _, r := range token {
+		if !strings.ContainsRune(`,.;:!?)]}'"`, r) {
+			return false
+		}
+	}
+	return true
 }
 
 // editDistance is the Levenshtein distance over tokens, computed with two rows
