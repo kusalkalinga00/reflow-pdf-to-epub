@@ -25,7 +25,7 @@ jobs:
           # Only hosted runners a private repository can use: Linux amd64,
           # macOS amd64 and macOS arm64. Linux arm64 is covered by the image.
           - { os: ubuntu-latest, goos: linux, goarch: amd64 }
-          - { os: macos-13, goos: darwin, goarch: amd64 }
+          - { os: macos-15-intel, goos: darwin, goarch: amd64 }
           - { os: macos-14, goos: darwin, goarch: arm64 }
 
     steps:
