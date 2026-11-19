@@ -131,6 +131,69 @@ func TestBuildTablesIgnoresASingleUnderline(t *testing.T) {
 	}
 }
 
+func TestBuildTablesSplitsARegionAtContentChange(t *testing.T) {
+	// The invoice's big frame: address prose at the top, the main table
+	// below, and no rule drawn between them. The split must come from the
+	// rows' shape.
+	rules := []Rule{
+		hrule(680.7, 45, 549.3), hrule(682.2, 45, 549.3),
+		hrule(281.9, 45, 549.3), hrule(283.4, 45, 549.3),
+	}
+
+	// Prose: single-column lines, top of the region.
+	words := []idm.Word{
+		w("INVOICE", 60, 660, 130, 670), w("TO", 140, 660, 165, 670),
+		w("Artin", 60, 630, 110, 640), w("Ltd", 120, 630, 150, 640),
+		w("26/7A", 60, 600, 100, 610), w("Lane", 110, 600, 150, 610),
+	}
+	// Table: multi-column rows, all starting at the same left edge.
+	for r, y := range []float64{546, 505, 462, 420, 376, 333} {
+		_ = r
+		words = append(words,
+			w("8 Oct", 50, y, 95, y+10),
+			w("Meeting", 170, y, 240, y+10),
+			w("1", 320, y, 330, y+10),
+			w("1,500.00", 450, y, 540, y+10),
+		)
+	}
+
+	tables := BuildTables(rules, words, pg())
+	if len(tables) != 1 {
+		t.Fatalf("tables = %d, want 1 (the prose must not become one): %v", len(tables), tables)
+	}
+
+	table := tables[0]
+	if got, want := table.Cells[0][0], "8 Oct"; got != want {
+		t.Errorf("first cell = %q, want %q", got, want)
+	}
+	// Six data rows: the fixture's "header" row is one of the identical
+	// data rows, so the grid is 6 rows, not 7.
+	if table.RowCount() != 6 {
+		t.Errorf("rows = %d, want 6", table.RowCount())
+	}
+}
+
+func TestBuildTablesRejectsCentredTitleOverByline(t *testing.T) {
+	// A wrapped title centred above a centred byline: two visual columns that
+	// do not repeat. Emitted as a table it eats the slide's title.
+	rules := []Rule{
+		hrule(268, 175, 542), hrule(60, 175, 542),
+	}
+
+	words := []idm.Word{
+		w("with", 175, 209, 264, 259),
+		w("Amazon", 282, 209, 445, 259),
+		w("EKS", 466, 209, 542, 259),
+		w("Faisal", 202, 68, 270, 105),
+		w("Memon", 283, 68, 373, 105),
+		w("(EmbarkX)", 386, 68, 516, 105),
+	}
+
+	if tables := BuildTables(rules, words, pg()); len(tables) != 0 {
+		t.Errorf("centred lines produced %d tables, want 0", len(tables))
+	}
+}
+
 func TestWordsOutsideTheRegionAreExcluded(t *testing.T) {
 	words := []idm.Word{
 		w("Date", 50, 660, 100, 670), w("Task", 170, 660, 210, 670),
