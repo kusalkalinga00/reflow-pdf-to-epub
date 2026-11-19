@@ -3,8 +3,10 @@ package web_test
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -14,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ingest"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/testpdf"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/web"
 )
@@ -268,5 +271,120 @@ func TestSecurityHeaders(t *testing.T) {
 	}
 	if got := resp.Header.Get("Content-Security-Policy"); !strings.Contains(got, "default-src 'none'") {
 		t.Errorf("CSP = %q", got)
+	}
+}
+
+// stubConverter records the document options the handler passes down.
+type stubConverter struct {
+	got    convert.DocOptions
+	result convert.Result
+	err    error
+}
+
+func (s *stubConverter) Run(_ context.Context, _ io.ReaderAt, _ int64, doc convert.DocOptions) (convert.Result, error) {
+	s.got = doc
+	return s.result, s.err
+}
+
+func uploadWithPassword(t *testing.T, name string, data []byte, password string) (*bytes.Buffer, string) {
+	t.Helper()
+
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+
+	part, err := w.CreateFormFile("file", name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	if password != "" {
+		if err := w.WriteField("password", password); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	return &buf, w.FormDataContentType()
+}
+
+func TestConvertPassesThePasswordToThePipeline(t *testing.T) {
+	stub := &stubConverter{result: convert.Result{EPUB: []byte("epub bytes")}}
+	srv := httptest.NewServer(web.New(stub, web.Options{}).Handler())
+	defer srv.Close()
+
+	body, contentType := uploadWithPassword(t, "book.pdf", testpdf.Build(1), "open-sesame")
+	resp, err := http.Post(srv.URL+"/api/convert", contentType, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := stub.got.Password; got != "open-sesame" {
+		t.Errorf("password = %q, want open-sesame", got)
+	}
+}
+
+func TestEncryptedPDFReturnsAPasswordCode(t *testing.T) {
+	stub := &stubConverter{err: fmt.Errorf("%w: it is encrypted", ingest.ErrEncrypted)}
+	srv := httptest.NewServer(web.New(stub, web.Options{}).Handler())
+	defer srv.Close()
+
+	body, contentType := uploadWithPassword(t, "book.pdf", testpdf.Build(1), "")
+	resp, err := http.Post(srv.URL+"/api/convert", contentType, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", resp.StatusCode)
+	}
+
+	var payload struct {
+		Error string `json:"error"`
+		Code  string `json:"code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if payload.Code != "password" {
+		t.Errorf("code = %q, want password", payload.Code)
+	}
+	if payload.Error == "" {
+		t.Error("error message is empty")
+	}
+}
+
+func TestWrongPasswordSaysItDidNotOpen(t *testing.T) {
+	stub := &stubConverter{err: fmt.Errorf("%w: it is encrypted", ingest.ErrEncrypted)}
+	srv := httptest.NewServer(web.New(stub, web.Options{}).Handler())
+	defer srv.Close()
+
+	body, contentType := uploadWithPassword(t, "book.pdf", testpdf.Build(1), "wrong")
+	resp, err := http.Post(srv.URL+"/api/convert", contentType, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	var payload struct {
+		Error string `json:"error"`
+		Code  string `json:"code"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode error body: %v", err)
+	}
+	if payload.Code != "password" {
+		t.Errorf("code = %q, want password", payload.Code)
+	}
+	if !strings.Contains(payload.Error, "did not open") {
+		t.Errorf("error = %q, want it to say the password did not open the file", payload.Error)
 	}
 }
