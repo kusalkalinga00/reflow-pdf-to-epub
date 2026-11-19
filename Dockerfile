@@ -63,6 +63,9 @@ ENV EPUBCHECK_JAR=/opt/epubcheck/epubcheck.jar
 
 COPY --from=build /out/reflow /usr/local/bin/reflow
 
+# MIT requires the notice to travel with copies of the software.
+COPY LICENSE /usr/share/doc/reflow/LICENSE
+
 RUN useradd --system --uid 10001 --home-dir /home/reflow --create-home reflow
 USER reflow
 WORKDIR /home/reflow
