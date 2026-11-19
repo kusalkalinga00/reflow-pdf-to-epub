@@ -1,9 +1,10 @@
 // Package web serves the local conversion UI.
 //
-// It is deliberately small: one page, one endpoint, no accounts, no storage.
-// A conversion happens inside the request and the EPUB comes back as the
-// response body, so nothing is written to disk and nothing survives the
-// request.
+// It is deliberately small: one page, two conversion endpoints, no accounts,
+// no disk storage. /api/convert answers the request with the EPUB, which is
+// what a script wants. /api/jobs returns an id and reports progress while the
+// book is built, which is what a browser needs; a job keeps its source bytes
+// and finished EPUB in memory until it expires.
 package web
 
 import (
@@ -50,6 +51,7 @@ type Server struct {
 	maxUpload int64
 	timeout   time.Duration
 	slots     chan struct{}
+	jobs      *jobStore
 	handler   http.Handler
 }
 
@@ -70,12 +72,17 @@ func New(converter Converter, opts Options) *Server {
 		maxUpload: opts.MaxUpload,
 		timeout:   opts.ConvertTimeout,
 		slots:     make(chan struct{}, opts.Concurrency),
+		jobs:      newJobStore(0, 0),
 	}
 
 	mux := http.NewServeMux()
 	// Registered without a method so a wrong method gets 405 rather than the
 	// static handler's 404.
 	mux.HandleFunc("/api/convert", s.handleConvert)
+	mux.HandleFunc("POST /api/jobs", s.handleJobStart)
+	mux.HandleFunc("GET /api/jobs/{id}", s.handleJobStatus)
+	mux.HandleFunc("GET /api/jobs/{id}/epub", s.handleJobEPUB)
+	mux.HandleFunc("DELETE /api/jobs/{id}", s.handleJobCancel)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.Handle("/", s.staticHandler())
 
@@ -116,36 +123,12 @@ func (s *Server) handleConvert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, s.maxUpload)
-
-	if err := r.ParseMultipartForm(8 << 20); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge, "too-large",
-				fmt.Sprintf("That file is larger than the %d MB limit.", s.maxUpload>>20))
-			return
-		}
-		writeError(w, http.StatusBadRequest, "upload", "The upload could not be read.")
+	file, header, password, ok := s.readUpload(w, r)
+	if !ok {
 		return
 	}
 	defer r.MultipartForm.RemoveAll()
-
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "no-file", "No file was uploaded.")
-		return
-	}
 	defer file.Close()
-
-	// A password is optional and used for this request only. It is never
-	// logged or stored, and it is bounded so a request cannot carry an
-	// arbitrarily large string into the PDF parser.
-	password := r.FormValue("password")
-	if len(password) > maxPasswordBytes {
-		writeError(w, http.StatusBadRequest, "password-too-long",
-			"That password is too long.")
-		return
-	}
 
 	size, err := file.Seek(0, io.SeekEnd)
 	if err != nil {
