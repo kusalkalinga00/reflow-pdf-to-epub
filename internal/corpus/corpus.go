@@ -41,6 +41,13 @@ type Case struct {
 	// Reference marks expected text that came from another extractor rather
 	// than from the document's source.
 	Reference bool
+
+	// MinCharRecall and MaxWordErrorRate override the defaults. Zero means
+	// "use the package threshold", which suits prose. A form or résumé with
+	// no canonical word order across its columns states its own tolerance in
+	// name.expect.json.
+	MinCharRecall    float64
+	MaxWordErrorRate float64
 }
 
 // Result is the outcome of running one case.
@@ -147,12 +154,20 @@ func runCase(converter *convert.Converter, c Case) (res Result) {
 		return res
 	}
 
-	var problems []string
-	if res.CharRecall < MinCharRecall {
-		problems = append(problems, fmt.Sprintf("character recall %.1f%% is below %.0f%%", res.CharRecall*100, MinCharRecall*100))
+	minRecall, maxWER := MinCharRecall, MaxWordErrorRate
+	if c.MinCharRecall > 0 {
+		minRecall = c.MinCharRecall
 	}
-	if res.WordErrorRate > MaxWordErrorRate {
-		problems = append(problems, fmt.Sprintf("word error rate %.1f%% is above %.0f%%", res.WordErrorRate*100, MaxWordErrorRate*100))
+	if c.MaxWordErrorRate > 0 {
+		maxWER = c.MaxWordErrorRate
+	}
+
+	var problems []string
+	if res.CharRecall < minRecall {
+		problems = append(problems, fmt.Sprintf("character recall %.1f%% is below %.0f%%", res.CharRecall*100, minRecall*100))
+	}
+	if res.WordErrorRate > maxWER {
+		problems = append(problems, fmt.Sprintf("word error rate %.1f%% is above %.0f%%", res.WordErrorRate*100, maxWER*100))
 	}
 	if !res.OrderOK {
 		problems = append(problems, "text is not in reading order")
