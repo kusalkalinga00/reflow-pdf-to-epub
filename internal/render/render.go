@@ -510,10 +510,38 @@ func hasHeadings(paras []Paragraph) bool {
 func ParagraphText(paras []Paragraph) string {
 	var b strings.Builder
 	for _, p := range paras {
+		text := p.Text
+		if p.Kind == idm.KindTable && p.Table != nil {
+			// A table's words live in its grid, not in Text. Measurement
+			// must see them: otherwise ground truth counts every recovered
+			// cell as lost text and the score describes a book nobody gets.
+			text = tableText(p.Table)
+		}
+		if text == "" {
+			continue
+		}
 		if b.Len() > 0 {
 			b.WriteByte(' ')
 		}
-		b.WriteString(p.Text)
+		b.WriteString(text)
+	}
+	return b.String()
+}
+
+// tableText flattens a grid in reading order: rows top to bottom, cells left
+// to right.
+func tableText(grid *idm.TableGrid) string {
+	var b strings.Builder
+	for _, row := range grid.Cells {
+		for _, cell := range row {
+			if cell == "" {
+				continue
+			}
+			if b.Len() > 0 {
+				b.WriteByte(' ')
+			}
+			b.WriteString(cell)
+		}
 	}
 	return b.String()
 }

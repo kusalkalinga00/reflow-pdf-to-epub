@@ -613,3 +613,20 @@ func TestPositionlessSectionsFollowTheirOutlineNeighbour(t *testing.T) {
 		t.Errorf("BEng anchor misplaced (anchor %d, text %d):\n%s", anchor, text, body)
 	}
 }
+
+func TestParagraphTextIncludesTableCells(t *testing.T) {
+	paras := []Paragraph{
+		{Kind: idm.KindParagraph, Text: "Before the grid."},
+		{Kind: idm.KindTable, Table: &idm.TableGrid{Cells: [][]string{
+			{"Date", "Hours"},
+			{"8 October, 2026", "1"},
+		}}},
+		{Kind: idm.KindParagraph, Text: "After the grid."},
+	}
+
+	got := ParagraphText(paras)
+	want := "Before the grid. Date Hours 8 October, 2026 1 After the grid."
+	if got != want {
+		t.Errorf("ParagraphText = %q, want %q", got, want)
+	}
+}
