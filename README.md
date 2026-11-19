@@ -180,3 +180,7 @@ internal/testpdf/    deterministic PDF fixtures for tests
 The EPUB writer enforces the parts readers and validators actually check: `mimetype`
 first and stored with no extra field, a package document that lists every archive
 member, a nav document with a table of contents, and accessibility metadata.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
