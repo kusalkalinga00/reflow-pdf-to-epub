@@ -66,16 +66,18 @@ meant to be exposed to a network.
 		}
 	}
 
-	converter, err := convert.New(convert.Options{OCR: recognizer, Validator: validator})
+	// PDFium is single-threaded per instance, so real concurrency comes from
+	// a pool: -jobs converters, and the same number of request slots.
+	converters, err := convert.NewPool(*concurrency, convert.Options{OCR: recognizer, Validator: validator})
 	if err != nil {
 		fmt.Fprintln(stderr, "reflow:", err)
 		return exitFailure
 	}
-	defer converter.Close()
+	defer converters.Close()
 
-	server := web.New(converter, web.Options{
+	server := web.New(converters, web.Options{
 		MaxUpload:   int64(*maxMB) << 20,
-		Concurrency: *concurrency,
+		Concurrency: converters.Size(),
 	})
 
 	httpServer := &http.Server{

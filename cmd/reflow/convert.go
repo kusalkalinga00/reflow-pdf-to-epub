@@ -20,9 +20,10 @@ func convertCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("convert", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprint(stderr, `usage: reflow convert [-o file.epub] <file.pdf>
+		fmt.Fprint(stderr, `usage: reflow convert [-o file.epub] [-password pass] <file.pdf>
 
-Convert a PDF into a reflowable EPUB 3 ebook.
+Convert a PDF into a reflowable EPUB 3 ebook. -password opens an encrypted
+document you can already read; it is used for this run only.
 `)
 	}
 
@@ -30,6 +31,7 @@ Convert a PDF into a reflowable EPUB 3 ebook.
 	quiet := fs.Bool("q", false, "suppress progress messages")
 	useOCR := fs.Bool("ocr", true, "read pages with no text layer using tesseract")
 	useValidation := fs.Bool("validate", true, "reject the book if EPUBCheck finds errors")
+	password := fs.String("password", "", "password for an encrypted PDF you can already open")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -88,7 +90,7 @@ Convert a PDF into a reflowable EPUB 3 ebook.
 	result, err := convert.Convert(ctx, f, info.Size(), convert.Options{
 		OCR:       recognizer,
 		Validator: validator,
-	}, convert.DocOptions{Name: filepath.Base(path)})
+	}, convert.DocOptions{Name: filepath.Base(path), Password: *password})
 	if err != nil {
 		fmt.Fprintln(stderr, "reflow:", convert.Explain(err))
 		return exitFailure
