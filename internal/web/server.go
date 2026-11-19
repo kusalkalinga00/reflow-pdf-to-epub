@@ -103,7 +103,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleConvert(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
-		writeError(w, http.StatusMethodNotAllowed, "Use POST to convert a file.")
+		writeError(w, http.StatusMethodNotAllowed, "method", "Use POST to convert a file.")
 		return
 	}
 
@@ -112,7 +112,7 @@ func (s *Server) handleConvert(w http.ResponseWriter, r *http.Request) {
 		defer func() { <-s.slots }()
 	default:
 		w.Header().Set("Retry-After", "5")
-		writeError(w, http.StatusServiceUnavailable, "The converter is busy. Try again in a moment.")
+		writeError(w, http.StatusServiceUnavailable, "busy", "The converter is busy. Try again in a moment.")
 		return
 	}
 
@@ -121,38 +121,58 @@ func (s *Server) handleConvert(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			writeError(w, http.StatusRequestEntityTooLarge,
+			writeError(w, http.StatusRequestEntityTooLarge, "too-large",
 				fmt.Sprintf("That file is larger than the %d MB limit.", s.maxUpload>>20))
 			return
 		}
-		writeError(w, http.StatusBadRequest, "The upload could not be read.")
+		writeError(w, http.StatusBadRequest, "upload", "The upload could not be read.")
 		return
 	}
 	defer r.MultipartForm.RemoveAll()
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "No file was uploaded.")
+		writeError(w, http.StatusBadRequest, "no-file", "No file was uploaded.")
 		return
 	}
 	defer file.Close()
 
+	// A password is optional and used for this request only. It is never
+	// logged or stored, and it is bounded so a request cannot carry an
+	// arbitrarily large string into the PDF parser.
+	password := r.FormValue("password")
+	if len(password) > maxPasswordBytes {
+		writeError(w, http.StatusBadRequest, "password-too-long",
+			"That password is too long.")
+		return
+	}
+
 	size, err := file.Seek(0, io.SeekEnd)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "The upload could not be read.")
+		writeError(w, http.StatusBadRequest, "upload", "The upload could not be read.")
 		return
 	}
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		writeError(w, http.StatusBadRequest, "The upload could not be read.")
+		writeError(w, http.StatusBadRequest, "upload", "The upload could not be read.")
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), s.timeout)
 	defer cancel()
 
-	result, err := s.converter.Run(ctx, file, size, convert.DocOptions{Name: header.Filename})
+	result, err := s.converter.Run(ctx, file, size, convert.DocOptions{
+		Name:     header.Filename,
+		Password: password,
+	})
 	if err != nil {
-		writeError(w, statusFor(err), convert.Explain(err))
+		message := convert.Explain(err)
+		switch {
+		case errors.Is(err, ingest.ErrEncrypted) && password != "":
+			message = "That password did not open the PDF."
+		case errors.Is(err, ingest.ErrEncrypted):
+			message = "This PDF is password-protected. Enter its password to continue."
+		}
+		writeError(w, statusFor(err), errorCode(err), message)
 		return
 	}
 
@@ -192,12 +212,39 @@ func statusFor(err error) int {
 	}
 }
 
-func writeError(w http.ResponseWriter, status int, message string) {
+// maxPasswordBytes bounds the password a request may carry. PDF passwords are
+// short; anything longer is a client bug or an attempt to waste memory.
+const maxPasswordBytes = 256
+
+// errorCode names the machine-readable reason for a failure. A client keys
+// off the code — "password" means "ask for one and retry" — while the message
+// is what a person reads.
+func errorCode(err error) string {
+	switch {
+	case errors.Is(err, ingest.ErrEncrypted):
+		return "password"
+	case errors.Is(err, ingest.ErrTooLarge):
+		return "too-large"
+	case errors.Is(err, ingest.ErrTooManyPages):
+		return "too-many-pages"
+	case errors.Is(err, ingest.ErrInvalid):
+		return "invalid"
+	case errors.Is(err, render.ErrNoText):
+		return "no-text"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	default:
+		return "internal"
+	}
+}
+
+func writeError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(struct {
 		Error string `json:"error"`
-	}{Error: message})
+		Code  string `json:"code,omitempty"`
+	}{Error: message, Code: code})
 }
 
 // epubName turns "book.pdf" into "book.epub" and quotes nothing that could

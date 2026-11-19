@@ -129,6 +129,37 @@ a:focus-visible {
   outline-offset: 2px;
 }
 
+.password {
+  margin-top: 1rem;
+}
+
+.password label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+
+.password input {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  background: var(--card);
+  color: var(--fg);
+  font: inherit;
+}
+
+.password input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.hint {
+  margin: 0.4rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 .status {
   min-height: 1.6rem;
   margin: 1rem 0 0;

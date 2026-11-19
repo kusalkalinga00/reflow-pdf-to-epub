@@ -93,8 +93,26 @@ func NewPDFium(opts Options) (*PDFium, error) {
 // Close releases the PDFium pool.
 func (e *PDFium) Close() error { return e.pool.Close() }
 
+// ExtractOptions are per-document settings. They exist separately from
+// Options because a server reuses one extractor for many documents and must
+// not keep one reader's password for the next.
+type ExtractOptions struct {
+	// Password overrides Options.Password for this document. It is never
+	// written to disk or logs.
+	Password string
+	// Progress reports pages finished. Total is zero until the document is
+	// open, then the page count. Done counts pages extracted, so a long book
+	// can show real progress instead of a spinner.
+	Progress func(done, total int)
+}
+
 // Extract reads every page of src.
 func (e *PDFium) Extract(ctx context.Context, src io.ReaderAt, size int64) (idm.Document, error) {
+	return e.ExtractDoc(ctx, src, size, ExtractOptions{})
+}
+
+// ExtractDoc reads every page of src with per-document settings.
+func (e *PDFium) ExtractDoc(ctx context.Context, src io.ReaderAt, size int64, opts ExtractOptions) (idm.Document, error) {
 	if err := ctx.Err(); err != nil {
 		return idm.Document{}, err
 	}
@@ -106,9 +124,17 @@ func (e *PDFium) Extract(ctx context.Context, src io.ReaderAt, size int64) (idm.
 		FileReader:     io.NewSectionReader(src, 0, size),
 		FileReaderSize: size,
 	}
-	if e.opts.Password != "" {
-		open.Password = &e.opts.Password
+	password := e.opts.Password
+	if opts.Password != "" {
+		password = opts.Password
 	}
+	if password != "" {
+		open.Password = &password
+	}
+
+	// The extractor is reused across documents; one document's unreadable
+	// images must not be counted against the next.
+	e.skippedImages = 0
 
 	doc, err := e.instance.OpenDocument(open)
 	if err != nil {
@@ -126,6 +152,9 @@ func (e *PDFium) Extract(ctx context.Context, src io.ReaderAt, size int64) (idm.
 		Outline: e.outline(doc.Document),
 	}
 
+	if opts.Progress != nil {
+		opts.Progress(0, count.PageCount)
+	}
 	for i := 0; i < count.PageCount; i++ {
 		if err := ctx.Err(); err != nil {
 			return out, err
@@ -137,6 +166,10 @@ func (e *PDFium) Extract(ctx context.Context, src io.ReaderAt, size int64) (idm.
 		}
 		out.Pages = append(out.Pages, page)
 		out.Blocks = append(out.Blocks, blocks...)
+
+		if opts.Progress != nil {
+			opts.Progress(i+1, count.PageCount)
+		}
 	}
 
 	out.Features = e.features(doc.Document, count.PageCount)

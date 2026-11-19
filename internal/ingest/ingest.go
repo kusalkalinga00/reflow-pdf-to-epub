@@ -75,6 +75,13 @@ type Info struct {
 // Check reads the structure of src and reports what it found. It never parses
 // page content, so it is cheap enough to run before queueing a job.
 func Check(ctx context.Context, src io.ReaderAt, size int64, limits Limits) (Info, error) {
+	return CheckWithPassword(ctx, src, size, limits, "")
+}
+
+// CheckWithPassword is Check with the password the reader supplied. Reflow
+// never removes DRM; the password only opens a document the reader can
+// already read in another app.
+func CheckWithPassword(ctx context.Context, src io.ReaderAt, size int64, limits Limits, password string) (Info, error) {
 	if size <= 0 {
 		return Info{}, fmt.Errorf("%w: empty file", ErrInvalid)
 	}
@@ -92,8 +99,11 @@ func Check(ctx context.Context, src io.ReaderAt, size int64, limits Limits) (Inf
 
 	// pdfcpu validates while it reads, in its relaxed mode: broken references
 	// are reported, but files real readers open still convert.
-	info, err := api.PDFInfo(ctx, io.NewSectionReader(src, 0, size), "", nil, false,
-		model.NewDefaultConfiguration())
+	conf := model.NewDefaultConfiguration()
+	if password != "" {
+		conf.UserPW = password
+	}
+	info, err := api.PDFInfo(ctx, io.NewSectionReader(src, 0, size), "", nil, false, conf)
 	if err != nil {
 		switch {
 		case errors.Is(err, pdfcpu.ErrWrongPassword), errors.Is(err, pdfcpu.ErrEncrypted):

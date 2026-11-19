@@ -10,6 +10,8 @@ const result = document.getElementById("result");
 const stats = document.getElementById("stats");
 const download = document.getElementById("download");
 const issues = document.getElementById("issues");
+const passwordRow = document.getElementById("password-row");
+const passwordInput = document.getElementById("password");
 
 let currentFile = null;
 let objectURL = null;
@@ -50,6 +52,9 @@ function selectFile(file) {
   fileName.textContent = file.name + " · " + formatSize(file.size);
   fileName.hidden = false;
   submit.disabled = false;
+  submit.textContent = "Convert to EPUB";
+  passwordRow.hidden = true;
+  passwordInput.value = "";
   resetOutput();
   setStatus("");
 }
@@ -88,11 +93,14 @@ form.addEventListener("submit", async (event) => {
 
   const body = new FormData();
   body.append("file", currentFile);
+  if (!passwordRow.hidden && passwordInput.value) {
+    body.append("password", passwordInput.value);
+  }
 
   try {
     const response = await fetch("/api/convert", { method: "POST", body });
     if (!response.ok) {
-      throw new Error(await errorMessage(response));
+      throw await conversionError(response);
     }
 
     const blob = await response.blob();
@@ -121,7 +129,16 @@ form.addEventListener("submit", async (event) => {
     setStatus("Done. Your EPUB is ready.", "ok");
     download.focus();
   } catch (err) {
-    setStatus(err.message || "Conversion failed.", "error");
+    if (err.code === "password") {
+      // Ask instead of refusing: the reader already owns the password.
+      const retry = passwordRow.hidden;
+      passwordRow.hidden = false;
+      submit.textContent = "Unlock and convert";
+      setStatus(err.message || "This PDF is password-protected.", "error");
+      if (retry) passwordInput.focus();
+    } else {
+      setStatus(err.message || "Conversion failed.", "error");
+    }
   } finally {
     submit.disabled = false;
   }
@@ -145,13 +162,17 @@ function decodeReport(value) {
   }
 }
 
-async function errorMessage(response) {
+async function conversionError(response) {
   try {
     const body = await response.json();
-    if (body && body.error) return body.error;
+    if (body && body.error) {
+      const err = new Error(body.error);
+      err.code = body.code || "";
+      return err;
+    }
   } catch {
     /* fall through to the generic message */
   }
-  if (response.status === 413) return "That file is too large.";
-  return "Conversion failed (" + response.status + ").";
+  if (response.status === 413) return new Error("That file is too large.");
+  return new Error("Conversion failed (" + response.status + ").");
 }
