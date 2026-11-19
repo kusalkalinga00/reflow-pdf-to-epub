@@ -1,4 +1,4 @@
-.PHONY: all build test vet fmt fmt-check tidy check run clean deps
+.PHONY: all build test vet fmt fmt-check tidy check run clean deps docker
 
 BIN := reflow
 PKG := github.com/kusalkalinga00/tool-factory-epub-convertor
@@ -28,6 +28,15 @@ $(EPUBCHECK_JAR):
 ## build: compile the CLI into bin/
 build: deps
 	go build -trimpath -ldflags "-X $(PKG)/internal/version.Version=$(shell git describe --tags --always --dirty 2>/dev/null || echo dev)" -o bin/$(BIN) ./cmd/reflow
+
+# The image tag. git describe gives v0.2.0-3-gabc1234 style names, which are
+# valid tags but noisy; a release build passes VERSION explicitly.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+IMAGE ?= reflow
+
+## docker: build the container image for this machine's platform
+docker:
+	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) -t $(IMAGE):latest .
 
 ## test: run the suite with the race detector
 test: deps
