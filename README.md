@@ -89,6 +89,24 @@ the `pkg-config` file that points at it; `build`, `test`, and `check` run it
 automatically. The rpath is baked in, so binaries and test suites run without
 setting `DYLD_LIBRARY_PATH`.
 
+### Local server
+
+`reflow serve` binds to `127.0.0.1:8080` and is not meant to be exposed. The
+page uses the job API; scripts can use either endpoint:
+
+| | |
+|---|---|
+| `POST /api/convert` | multipart `file` (+ optional `password`) → the EPUB in the response |
+| `POST /api/jobs` | same upload → `202 {"id": ...}` |
+| `GET /api/jobs/{id}` | state, stage, page progress, score, error code |
+| `GET /api/jobs/{id}/epub` | the finished book; `409` until ready |
+| `DELETE /api/jobs/{id}` | cancel a running conversion |
+
+There are no accounts and no history: jobs hold their bytes in memory, at most
+16 exist at once, and a finished job expires after 15 minutes. Nothing is
+written to disk. An encrypted PDF is opened with the reader's password for
+that one request; Reflow never removes DRM.
+
 The CLI is a thin shell around `internal/` packages; every pipeline stage is a
 library call so it can be tested without a running service.
 
