@@ -6,9 +6,18 @@
 // two-column page alternates between columns, line by line. This stage fixes
 // the order and strips the running headers and footers that would otherwise
 // appear in the middle of the text.
+//
+// Columns are found per band, not per page. A page mixes structures — an
+// invoice carries a two-column header over a one-grid table over paired
+// totals — and a page-wide gutter search sees their union, which is neither
+// structure. The page is cut into horizontal bands at its clear vertical
+// gaps, and each band is ordered by its own shape: parallel text columns read
+// column by column, paired short cells read row by row, and everything else
+// reads line by line.
 package layout
 
 import (
+	"math"
 	"sort"
 	"strings"
 
@@ -53,17 +62,158 @@ func orderPage(blocks []idm.Block, page idm.Page) []idm.Block {
 		body = append(body, b)
 	}
 
-	start, end, ok := findGutter(body, page.Width)
-	if !ok {
-		sortTopDown(body)
-		for i := range body {
-			body[i].Column = 0
+	var out []idm.Block
+	margin := contentMargin(body)
+	for _, band := range splitBands(body) {
+		out = append(out, orderBand(band, page.Width, margin)...)
+	}
+	return append(out, furniture...)
+}
+
+// contentMargin is the left edge of the page's text: where its paragraphs
+// and tables start.
+func contentMargin(blocks []idm.Block) float64 {
+	margin := math.Inf(1)
+	for _, b := range blocks {
+		margin = math.Min(margin, b.BBox.X0)
+	}
+	if math.IsInf(margin, 1) {
+		return 0
+	}
+	return margin
+}
+
+// bandGap is the vertical whitespace that separates two structures on a
+// page. Lines inside one structure sit closer than this — a line pitch is
+// its height plus a few points of leading, so lines gap by single digits —
+// while the gap around a heading, between an address block and the table
+// below it, or before a boxed total starts in the high teens.
+const bandGap = 15
+
+// splitBands cuts blocks into horizontal bands: runs of blocks whose vertical
+// extents come within bandGap of the run below, top-down.
+func splitBands(blocks []idm.Block) [][]idm.Block {
+	sorted := append([]idm.Block(nil), blocks...)
+	sortTopDown(sorted)
+
+	var bands [][]idm.Block
+	var cur []idm.Block
+	bottom := 0.0
+
+	for _, b := range sorted {
+		if len(cur) > 0 && bottom-b.BBox.Y1 > bandGap {
+			bands = append(bands, cur)
+			cur = nil
 		}
-		return append(body, furniture...)
+		if len(cur) == 0 {
+			bottom = b.BBox.Y0
+		} else if b.BBox.Y0 < bottom {
+			bottom = b.BBox.Y0
+		}
+		cur = append(cur, b)
+	}
+	if len(cur) > 0 {
+		bands = append(bands, cur)
+	}
+	return bands
+}
+
+// orderBand orders one band by its own shape. margin is the page's text
+// margin, which tells a page's own columns from a structure floating inside
+// it.
+func orderBand(blocks []idm.Block, pageWidth, margin float64) []idm.Block {
+	start, end, ok := findGutter(blocks, pageWidth)
+	if !ok {
+		return singleColumn(lineOrder(blocks))
 	}
 
-	ordered := orderColumns(body, start, end, page.Width)
-	return append(ordered, furniture...)
+	left, right, _ := splitColumns(blocks, start, end)
+
+	// Paired cells away from the page's text margin are a floating grid —
+	// an invoice's totals box, each label beside its value below the table —
+	// and read row by row so each label keeps its value. Paired columns at
+	// the margin are the page's own text, however short their lines, and
+	// read column by column.
+	if rowsPaired(left, right) && columnStart(left) > margin+marginTolerance {
+		return singleColumn(lineOrder(blocks))
+	}
+
+	return orderColumns(blocks, start, end)
+}
+
+// marginTolerance is how far right of the page's text margin a column pair
+// may start and still be the page's own text flow.
+const marginTolerance = 15
+
+// columnStart is a column's left edge.
+func columnStart(blocks []idm.Block) float64 {
+	if len(blocks) == 0 {
+		return 0
+	}
+	x0 := blocks[0].BBox.X0
+	for _, b := range blocks[1:] {
+		x0 = math.Min(x0, b.BBox.X0)
+	}
+	return x0
+}
+
+// wideColumn is the width at which a column holds running text rather than a
+// label or a number. Two columns this wide are parallel text; two narrower
+// paired ones are a grid.
+const wideColumn = 150
+
+// splitColumns divides blocks at a gutter. A block that crosses the gutter
+// belongs to neither column: it spans them.
+func splitColumns(blocks []idm.Block, gutterStart, gutterEnd float64) (left, right, spanning []idm.Block) {
+	for _, b := range blocks {
+		switch {
+		case b.BBox.X0 < gutterEnd && b.BBox.X1 > gutterStart:
+			spanning = append(spanning, b)
+		case b.BBox.X1 <= gutterStart+2:
+			b.Column = 0
+			left = append(left, b)
+		default:
+			b.Column = 1
+			right = append(right, b)
+		}
+	}
+	return left, right, spanning
+}
+
+// rowsPaired reports whether the two columns form a row grid: the same
+// number of lines, each left line sharing its vertical position with a right
+// one. A label/value grid pairs up this way; parallel text columns do not,
+// because one runs longer or carries a heading the other lacks.
+func rowsPaired(left, right []idm.Block) bool {
+	if len(left) == 0 || len(right) == 0 {
+		return false
+	}
+
+	llines, rlines := linesOf(left), linesOf(right)
+	if len(llines) != len(rlines) {
+		return false
+	}
+	for i := range llines {
+		lBottom, lTop := lineRange(llines[i])
+		rBottom, rTop := lineRange(rlines[i])
+		if rTop < lBottom || lTop < rBottom {
+			return false
+		}
+	}
+	return true
+}
+
+// columnWidth is the horizontal span of a column's blocks.
+func columnWidth(blocks []idm.Block) float64 {
+	if len(blocks) == 0 {
+		return 0
+	}
+	x0, x1 := blocks[0].BBox.X0, blocks[0].BBox.X1
+	for _, b := range blocks[1:] {
+		x0 = math.Min(x0, b.BBox.X0)
+		x1 = math.Max(x1, b.BBox.X1)
+	}
+	return x1 - x0
 }
 
 // findGutter looks for a vertical band that no narrow block crosses. A full
@@ -140,25 +290,19 @@ func findGutter(blocks []idm.Block, pageWidth float64) (start, end float64, ok b
 
 // orderColumns emits the left column, then the right column, keeping any
 // block that spans the gutter at its vertical position.
-func orderColumns(blocks []idm.Block, gutterStart, gutterEnd, pageWidth float64) []idm.Block {
-	var left, right, spanning []idm.Block
+func orderColumns(blocks []idm.Block, gutterStart, gutterEnd float64) []idm.Block {
+	left, right, spanning := splitColumns(blocks, gutterStart, gutterEnd)
 
-	for _, b := range blocks {
-		switch {
-		case b.BBox.X0 < gutterEnd && b.BBox.X1 > gutterStart:
-			spanning = append(spanning, b)
-		case b.BBox.X1 <= gutterStart+2:
-			b.Column = 0
-			left = append(left, b)
-		default:
-			b.Column = 1
-			right = append(right, b)
-		}
-	}
-
-	sortTopDown(left)
-	sortTopDown(right)
+	left = lineOrder(left)
+	right = lineOrder(right)
 	sortTopDown(spanning)
+
+	// A narrow strip beside a left column is an annotation on that column's
+	// header — dates beside a résumé entry, a total beside a label — and
+	// reads with the header, not after the body below it.
+	if header, ok := stripHeader(left); ok && columnWidth(right) < wideColumn {
+		return orderWithStrip(left, right, spanning, header)
+	}
 
 	out := make([]idm.Block, 0, len(blocks))
 	li, ri := 0, 0
@@ -176,49 +320,142 @@ func orderColumns(blocks []idm.Block, gutterStart, gutterEnd, pageWidth float64)
 		out = append(out, s)
 	}
 
-	// A narrow right-hand strip is not a column of text: it holds the
-	// right-aligned dates of a résumé, each belonging to the entry beside it.
-	// Emitting it after every left block would move "Sep 2020 - Jan 2022"
-	// from its job to the end of the page. Merge the remainders by vertical
-	// position instead, left first on a tie. A real two-column page keeps the
-	// column order, because its right column is wide.
-	if isAnnotationStrip(right, pageWidth) {
-		for li < len(left) || ri < len(right) {
-			switch {
-			case li >= len(left):
-				out = append(out, right[ri])
-				ri++
-			case ri >= len(right):
-				out = append(out, left[li])
-				li++
-			case left[li].BBox.Y1 >= right[ri].BBox.Y1:
-				out = append(out, left[li])
-				li++
-			default:
-				out = append(out, right[ri])
-				ri++
-			}
-		}
-		return out
-	}
-
 	out = append(out, left[li:]...)
 	out = append(out, right[ri:]...)
 	return out
 }
 
-// isAnnotationStrip reports whether the right-hand blocks are narrow labels
-// hugging the right margin rather than a column of body text.
-func isAnnotationStrip(right []idm.Block, pageWidth float64) bool {
-	if len(right) == 0 || pageWidth <= 0 {
-		return false
+// indentTolerance is how far right of a column's margin a line may start and
+// still be part of the column's header. Indented bodies — bulleted duties,
+// list items — start further in than this.
+const indentTolerance = 8
+
+// stripHeader reports whether the left column begins with a header run: the
+// leading lines that start at the column's left margin. It returns the
+// number of lines in the run.
+//
+// The header is what a margin annotation belongs to. A résumé entry's title
+// and employer sit at the margin; its duties are indented below them; the
+// dates beside the entry read between the two.
+func stripHeader(left []idm.Block) (int, bool) {
+	lines := linesOf(left)
+	if len(lines) == 0 {
+		return 0, false
 	}
-	for _, b := range right {
-		if b.BBox.X0 < 0.7*pageWidth || b.BBox.Width() > 0.2*pageWidth {
-			return false
+
+	margin := left[0].BBox.X0
+	for _, b := range left[1:] {
+		margin = math.Min(margin, b.BBox.X0)
+	}
+
+	header := 0
+	for _, line := range lines {
+		if line[0].BBox.X0 > margin+indentTolerance {
+			break
+		}
+		header++
+	}
+	if header == 0 {
+		return 0, false
+	}
+	return header, true
+}
+
+// orderWithStrip emits the left column's header, then the right-hand strip
+// that annotates it, then the body: the indented left lines and the spanning
+// blocks, in reading order.
+func orderWithStrip(left, right, spanning []idm.Block, header int) []idm.Block {
+	var out []idm.Block
+
+	// Spanning blocks above the header come first.
+	top := left[0].BBox.Y1
+	var below []idm.Block
+	for _, s := range spanning {
+		if s.BBox.Y1 > top {
+			out = append(out, s)
+		} else {
+			below = append(below, s)
 		}
 	}
-	return true
+
+	out = append(out, left[:header]...)
+	out = append(out, right...)
+
+	body := left[header:]
+	li := 0
+	for _, s := range below {
+		for li < len(body) && body[li].BBox.Y1 > s.BBox.Y1 {
+			out = append(out, body[li])
+			li++
+		}
+		out = append(out, s)
+	}
+	out = append(out, body[li:]...)
+	return out
+}
+
+// singleColumn marks blocks as one column.
+func singleColumn(blocks []idm.Block) []idm.Block {
+	for i := range blocks {
+		blocks[i].Column = 0
+	}
+	return blocks
+}
+
+// lineOrder orders blocks by line: lines top-down, and left to right within a
+// line. Blocks on one line do not share a baseline exactly — a label and the
+// value beside it sit a fraction of a point apart — so a plain top-down sort
+// interleaves them by whichever is a hair higher. Line grouping reads them
+// the way the page shows them.
+func lineOrder(blocks []idm.Block) []idm.Block {
+	var out []idm.Block
+	for _, line := range linesOf(blocks) {
+		sorted := append([]idm.Block(nil), line...)
+		sort.SliceStable(sorted, func(i, j int) bool {
+			return sorted[i].BBox.X0 < sorted[j].BBox.X0
+		})
+		out = append(out, sorted...)
+	}
+	return out
+}
+
+// linesOf groups blocks whose vertical extents overlap into lines, top-down.
+// Overlap chains: three blocks that each overlap a neighbour are one line
+// even where the first and last do not overlap each other.
+func linesOf(blocks []idm.Block) [][]idm.Block {
+	sorted := append([]idm.Block(nil), blocks...)
+	sortTopDown(sorted)
+
+	var lines [][]idm.Block
+	var cur []idm.Block
+	bottom := 0.0
+
+	for _, b := range sorted {
+		if len(cur) > 0 && b.BBox.Y1 < bottom {
+			lines = append(lines, cur)
+			cur = nil
+		}
+		if len(cur) == 0 {
+			bottom = b.BBox.Y0
+		} else if b.BBox.Y0 < bottom {
+			bottom = b.BBox.Y0
+		}
+		cur = append(cur, b)
+	}
+	if len(cur) > 0 {
+		lines = append(lines, cur)
+	}
+	return lines
+}
+
+// lineRange is a line's vertical extent.
+func lineRange(line []idm.Block) (bottom, top float64) {
+	bottom, top = line[0].BBox.Y0, line[0].BBox.Y1
+	for _, b := range line[1:] {
+		bottom = math.Min(bottom, b.BBox.Y0)
+		top = math.Max(top, b.BBox.Y1)
+	}
+	return bottom, top
 }
 
 func sortTopDown(blocks []idm.Block) {
