@@ -89,6 +89,40 @@ the `pkg-config` file that points at it; `build`, `test`, and `check` run it
 automatically. The rpath is baked in, so binaries and test suites run without
 setting `DYLD_LIBRARY_PATH`.
 
+### Measuring against real books
+
+`corpus/private/` is gitignored, so real documents stay local. Put each PDF
+there with the text a reader should see:
+
+```
+corpus/private/Book.pdf          the document
+corpus/private/Book.txt          ground truth: the visible text, in reading order
+corpus/private/Book.expect.json  optional: what "correct" means for this book
+```
+
+```sh
+make build && ./bin/reflow corpus -dir corpus/private
+```
+
+A `.txt` is transcribed from the page, not produced by another extractor, so it
+measures what the reader gets rather than what a second engine happens to
+agree with. PDFs without a `.txt` need `-no-expect` (run and report, no
+verdict) or `-reference` (measure against `pdftotext`). The optional sidecar
+sets per-document thresholds and order markers:
+
+```json
+{
+  "minCharRecall": 0.99,
+  "maxWordErrorRate": 0.1,
+  "wantOrder": ["INVOICE", "8 October, 2026", "Sub Total"],
+  "chapters": ["INVOICE"]
+}
+```
+
+The defaults suit prose, where word order is canonical. A form or résumé has no
+single linear order across its columns, so it states its own tolerance; the
+metrics are still printed in full, so a loosened threshold hides nothing.
+
 The CLI is a thin shell around `internal/` packages; every pipeline stage is a
 library call so it can be tested without a running service.
 

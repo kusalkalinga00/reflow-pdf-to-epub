@@ -62,7 +62,7 @@ func orderPage(blocks []idm.Block, page idm.Page) []idm.Block {
 		return append(body, furniture...)
 	}
 
-	ordered := orderColumns(body, start, end)
+	ordered := orderColumns(body, start, end, page.Width)
 	return append(ordered, furniture...)
 }
 
@@ -140,7 +140,7 @@ func findGutter(blocks []idm.Block, pageWidth float64) (start, end float64, ok b
 
 // orderColumns emits the left column, then the right column, keeping any
 // block that spans the gutter at its vertical position.
-func orderColumns(blocks []idm.Block, gutterStart, gutterEnd float64) []idm.Block {
+func orderColumns(blocks []idm.Block, gutterStart, gutterEnd, pageWidth float64) []idm.Block {
 	var left, right, spanning []idm.Block
 
 	for _, b := range blocks {
@@ -176,9 +176,49 @@ func orderColumns(blocks []idm.Block, gutterStart, gutterEnd float64) []idm.Bloc
 		out = append(out, s)
 	}
 
+	// A narrow right-hand strip is not a column of text: it holds the
+	// right-aligned dates of a résumé, each belonging to the entry beside it.
+	// Emitting it after every left block would move "Sep 2020 - Jan 2022"
+	// from its job to the end of the page. Merge the remainders by vertical
+	// position instead, left first on a tie. A real two-column page keeps the
+	// column order, because its right column is wide.
+	if isAnnotationStrip(right, pageWidth) {
+		for li < len(left) || ri < len(right) {
+			switch {
+			case li >= len(left):
+				out = append(out, right[ri])
+				ri++
+			case ri >= len(right):
+				out = append(out, left[li])
+				li++
+			case left[li].BBox.Y1 >= right[ri].BBox.Y1:
+				out = append(out, left[li])
+				li++
+			default:
+				out = append(out, right[ri])
+				ri++
+			}
+		}
+		return out
+	}
+
 	out = append(out, left[li:]...)
 	out = append(out, right[ri:]...)
 	return out
+}
+
+// isAnnotationStrip reports whether the right-hand blocks are narrow labels
+// hugging the right margin rather than a column of body text.
+func isAnnotationStrip(right []idm.Block, pageWidth float64) bool {
+	if len(right) == 0 || pageWidth <= 0 {
+		return false
+	}
+	for _, b := range right {
+		if b.BBox.X0 < 0.7*pageWidth || b.BBox.Width() > 0.2*pageWidth {
+			return false
+		}
+	}
+	return true
 }
 
 func sortTopDown(blocks []idm.Block) {

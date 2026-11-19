@@ -29,24 +29,31 @@ func BuildTables(rules []Rule, words []idm.Word, page idm.Page) []Table {
 	hRules, _ := longRules(rules)
 
 	var out []Table
-	for _, reg := range regions(hRules) {
-		if t, ok := buildTable(words, reg); ok {
-			out = append(out, t)
-			continue
-		}
-
-		// A region that is not itself a table may still hold one: producers
-		// draw a big frame around a whole layout box and then rule the header
-		// of the table inside it. Interior rules subdivide the region, and
-		// each sub-region gets the same chance to be a table.
-		for _, sub := range subRegions(reg, hRules, words) {
-			if t, ok := buildTable(words, sub); ok {
-				out = append(out, t)
-			}
-		}
+	for _, reg := range regions(hRules, words) {
+		out = append(out, tablesIn(reg, hRules, words, 0)...)
 	}
 
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Top > out[j].Top })
+	return out
+}
+
+// tablesIn returns the tables inside a region, splitting it as often as it
+// takes. Recursion matters: a layout box fails as a table, its content split
+// yields an address block and a table, and a rule inside that table (the
+// invoice rules its 6 November row as a band of its own) needs a further
+// split.
+func tablesIn(reg region, hRules []Rule, words []idm.Word, depth int) []Table {
+	if t, ok := buildTable(words, reg); ok {
+		return []Table{t}
+	}
+	if depth >= 3 {
+		return nil
+	}
+
+	var out []Table
+	for _, sub := range subRegions(reg, hRules, words) {
+		out = append(out, tablesIn(sub, hRules, words, depth+1)...)
+	}
 	return out
 }
 
@@ -215,6 +222,9 @@ func subRegions(reg region, hRules []Rule, words []idm.Word) []region {
 	if len(out) <= 1 {
 		if cut, ok := fillChange(words, reg); ok {
 			if reg.top-cut >= 12 && cut-reg.bottom >= 12 {
+				// Replace the whole-region placeholder; keeping it would make
+				// the caller try the unsplittable region again.
+				out = out[:0]
 				out = append(out,
 					region{top: reg.top, bottom: cut, left: reg.left, right: reg.right},
 					region{top: cut, bottom: reg.bottom, left: reg.left, right: reg.right},
@@ -334,7 +344,7 @@ func columnCount(words []idm.Word) int {
 // Bands come from the strict matcher, so a band of matching rules is the
 // frame of one structure. Doubled lines collapse to one boundary, and a band
 // that leaves fewer than two distinct boundaries is an underline.
-func regions(hRules []Rule) []region {
+func regions(hRules []Rule, words []idm.Word) []region {
 	var out []region
 	for _, band := range bands(hRules) {
 		ys := make([]float64, 0, len(band))
@@ -371,6 +381,44 @@ func regions(hRules []Rule) []region {
 				merged = true
 				break
 			}
+		}
+		if !merged {
+			out = append(out, reg)
+		}
+	}
+	return mergeStacked(out, words)
+}
+
+// mergeStacked joins regions that are vertically adjacent and hold words in
+// the gap between them.
+//
+// A producer can rule each row of a long table as its own band. The invoice
+// draws its 6 November row in a 15pt band of its own, between the band of the
+// rows above and the band of the rows below; none of the three is a table on
+// its own. Words living in the gap are the evidence that the bands are one
+// structure rather than two tables with a caption between them.
+func mergeStacked(regs []region, words []idm.Word) []region {
+	sort.SliceStable(regs, func(i, j int) bool { return regs[i].top > regs[j].top })
+
+	out := make([]region, 0, len(regs))
+	for _, reg := range regs {
+		merged := false
+		for i := range out {
+			upper := &out[i]
+			if math.Abs(upper.left-reg.left) > 2 || math.Abs(upper.right-reg.right) > 2 {
+				continue
+			}
+			gap := upper.bottom - reg.top
+			if gap < 0 || gap > 24 {
+				continue
+			}
+			gapRegion := region{top: upper.bottom, bottom: reg.top, left: reg.left, right: reg.right}
+			if len(wordsWithin(words, gapRegion)) == 0 {
+				continue
+			}
+			upper.bottom = reg.bottom
+			merged = true
+			break
 		}
 		if !merged {
 			out = append(out, reg)
