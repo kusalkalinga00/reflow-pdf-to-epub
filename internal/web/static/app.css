@@ -315,6 +315,17 @@ kbd {
   border-top: 1px solid var(--line);
 }
 
+.row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.row-hint {
+  color: var(--faint);
+  font-size: 0.74rem;
+}
+
 .segmented {
   display: inline-flex;
   gap: 2px;
@@ -605,6 +616,12 @@ body:has(#result:not([hidden])) button[type="submit"]:not(:disabled) kbd {
 .stats {
   margin: 0.15rem 0 0;
   color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.quality {
+  margin: 0.5rem 0 0;
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
 }

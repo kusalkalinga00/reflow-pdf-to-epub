@@ -57,7 +57,10 @@
           </div>
         </div>
         <div class="row">
-          <label for="report">Quality Analysis Report</label>
+          <div class="row-text">
+            <label for="report">Quality Analysis Report</label>
+            <span class="row-hint">Tier, score and any losses, in the result</span>
+          </div>
           <span class="switch">
             <input type="checkbox" id="report" checked>
             <span class="track" aria-hidden="true"></span>
@@ -93,6 +96,7 @@
         <div>
           <h2 id="result-title">Ready</h2>
           <p class="stats" id="stats"></p>
+          <p class="quality" id="quality" hidden></p>
         </div>
       </div>
       <ul class="issues" id="issues" aria-label="Conversion notes"></ul>
