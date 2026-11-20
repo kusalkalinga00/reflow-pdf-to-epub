@@ -74,7 +74,7 @@ func TestIndexServesTheUI(t *testing.T) {
 	}
 
 	body, _ := io.ReadAll(resp.Body)
-	for _, want := range []string{"Reflow", "Choose a PDF", "Convert to EPUB"} {
+	for _, want := range []string{"Reflow", "Drop a PDF here", "Convert to EPUB", "EPUBCheck validated"} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("page is missing %q", want)
 		}

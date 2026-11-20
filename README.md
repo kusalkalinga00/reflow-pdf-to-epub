@@ -374,8 +374,11 @@ reflow serve
 # reflow is listening on http://127.0.0.1:8080
 ```
 
-A single page: drop a PDF, watch it convert, download the EPUB with its score and warnings. Two
-endpoints, for two kinds of client:
+A single page: drop a PDF, watch it convert, download the EPUB with its score and warnings.
+
+![The Reflow web app: a drop zone above a measured result card](docs/screenshots/web-app.png)
+
+Two endpoints, for two kinds of client:
 
 | | |
 |---|---|

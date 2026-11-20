@@ -252,7 +252,9 @@ async function finishJob(state) {
     issues.appendChild(item);
   }
 
-  progressLabel.textContent = "Done · " + formatElapsed(Date.now() - startedAt);
+  // The result card says everything the progress line would; leave the bar
+  // behind so the finished state is one clean card.
+  progressWrap.hidden = true;
   result.hidden = false;
   setStatus("Done. Your EPUB is ready.", "ok");
   download.focus();
