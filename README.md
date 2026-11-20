@@ -266,7 +266,7 @@ Tiers mean exactly what they say:
 |---|---|
 | **T1 Structured** | Chapters and headings were detected |
 | **T2 Reflowed** | Clean text, uncertain structure |
-| **T3 Facsimile** | Reserved for the page-image path, which does not exist yet |
+| **T3 Facsimile** | No text layer: every page is an image. Layout faithful, text not selectable |
 
 The score is auditable: every deduction is one of a handful of named signals (blank pages, no
 headings, generic chapter titles, low-confidence blocks, flattened tables, dropped figures,
@@ -281,7 +281,8 @@ skipped images), and the report carries the numbers behind it.
 | Encrypted PDF, no password | Asks for one (web) or requires `-password` (CLI), and says so plainly |
 | Wrong password | `This PDF needs a password` — never an attempt to crack it |
 | Scanned pages, Tesseract present | Reads them with OCR; the report marks the pages it had to |
-| Scanned pages, Tesseract absent | Leaves them empty and the report says which pages are missing |
+| No text at all, images present | A T3 page-image book: every page rendered, the loss named |
+| No text and no images | Refused: there is nothing to convert |
 | Book fails EPUBCheck | The conversion fails; no file is written |
 | Upload too big | 100 MB / 1,000 pages by default, refused before parsing |
 | Image in an unembeddable format | Skipped, counted, and reported by name |
@@ -516,8 +517,9 @@ job API shows page progress; the CLI prints when it is done. This is not a netwo
   rather than jumping to the wrong note.
 - **Vector figures and alpha** are not preserved: a PDF's vector art becomes an embedded raster or
   is skipped, and PNG alpha is flattened.
-- **Scans stay T2.** OCR recovers text, but the page-image fallback that would make a scan a
-  facsimile EPUB was never built, so the tier is capped.
+- **Scans without a text layer become T3 page-image books.** Every page is rendered to an image,
+  so the layout is faithful but the text is neither selectable nor searchable. Scanned pages that
+  OCR can read still reflow as T2.
 - **Balanced narrow columns are ambiguous.** A pair of narrow columns with no margin context reads
   row-wise. The real invoice's header escapes only because its address runs longer.
 - **A margin-anchored label/value grid** would read column-wise (labels, then values). Ruled grids
