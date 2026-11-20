@@ -73,7 +73,7 @@ function selectFile(file) {
   fileName.textContent = file.name + " · " + formatSize(file.size);
   fileName.hidden = false;
   submit.disabled = false;
-  submit.textContent = "Convert to EPUB";
+  submit.textContent = "Convert";
   passwordRow.hidden = true;
   passwordInput.value = "";
   resetOutput();
@@ -271,7 +271,7 @@ function handleError(err) {
     // Ask instead of refusing: the reader already owns the password.
     const first = passwordRow.hidden;
     passwordRow.hidden = false;
-    submit.textContent = "Unlock and convert";
+    submit.textContent = "Unlock";
     setStatus(err.message || "This PDF is password-protected.", "error");
     if (first) passwordInput.focus();
     progressWrap.hidden = true;
