@@ -69,12 +69,26 @@ func Render(doc idm.Document, opts Options) (epub.Book, error) {
 	}
 
 	assets := &assets{}
-	for i, ch := range chapters {
-		body, pages := chapterXHTML(ch, assets)
 
+	// A link to a printed page becomes a link to that page's anchor. Those
+	// anchors live in whichever chapter holds the page, so the mapping is made
+	// before any chapter is written.
+	filenames := make([]string, len(chapters))
+	pageFile := make(map[int]string, len(doc.Pages))
+	for i, ch := range chapters {
 		// The writer names chapter files by position, so the page list and
 		// the nested section links can compute the same path here.
-		filename := fmt.Sprintf("text/chapter-%03d.xhtml", i+1)
+		filenames[i] = fmt.Sprintf("text/chapter-%03d.xhtml", i+1)
+		for _, p := range ch.paras {
+			if _, ok := pageFile[p.Page]; !ok {
+				pageFile[p.Page] = filenames[i]
+			}
+		}
+	}
+
+	for i, ch := range chapters {
+		filename := filenames[i]
+		body, pages := chapterXHTML(ch, assets, filename, pageFile)
 
 		book.Chapters = append(book.Chapters, epub.Chapter{
 			Title:    ch.title,
@@ -316,17 +330,43 @@ func chapterRefs(paras []Paragraph, notes map[int]footnote) references {
 // The spans are used only when they reconstruct the text exactly: a mismatch
 // means the styling no longer describes the paragraph, and plain text is
 // better than markup that moves or loses a word.
-func inlineXHTML(text string, spans []idm.Span, ref *noteref) string {
+func inlineXHTML(text string, spans []idm.Span, ref *noteref, resolve func(string) (string, bool)) string {
 	if len(spans) == 0 || spanText(spans) != text {
 		return escape(text)
 	}
 
 	var b strings.Builder
 	for _, s := range spans {
+		href := ""
+		if s.Href != "" {
+			if target, ok := resolve(s.Href); ok {
+				href = target
+			} else {
+				// The destination is not in the book: keep the words and any
+				// styling, drop only the link. A link to nowhere is worse than
+				// plain text.
+				if s.Super {
+					b.WriteString("<sup>" + escape(s.Text) + "</sup>")
+				} else {
+					b.WriteString(escape(s.Text))
+				}
+				continue
+			}
+		}
+
+		open := ""
+		if href != "" {
+			open = `<a href="` + escape(href) + `">`
+		}
+
 		switch {
 		case s.Super && ref != nil && strings.TrimSpace(s.Text) == ref.marker:
 			fmt.Fprintf(&b, `<a class="noteref" epub:type="noteref" role="doc-noteref" id="%s" href="#%s"><sup>%s</sup></a>`,
 				ref.refID, ref.noteID, escape(s.Text))
+		case href != "" && s.Super:
+			b.WriteString(open + "<sup>" + escape(s.Text) + "</sup></a>")
+		case href != "":
+			b.WriteString(open + escape(s.Text) + "</a>")
 		case s.Super:
 			b.WriteString("<sup>")
 			b.WriteString(escape(s.Text))
@@ -344,6 +384,36 @@ func inlineXHTML(text string, spans []idm.Span, ref *noteref) string {
 		}
 	}
 	return b.String()
+}
+
+// pageLinkResolver turns a page reference into a fragment link that works in
+// the finished book.
+//
+// A reference is "#page-N", which render writes for every page that carries
+// content. The anchor lives in the chapter that holds the page, so a link
+// inside one chapter points at itself and a link to another chapter carries the
+// file name. A page with no anchor — a blank page — has no destination, and the
+// link falls back to plain text.
+func pageLinkResolver(filename string, pageFile map[int]string) func(string) (string, bool) {
+	return func(href string) (string, bool) {
+		if !strings.HasPrefix(href, "#page-") {
+			return href, true
+		}
+		n, err := strconv.Atoi(strings.TrimPrefix(href, "#page-"))
+		if err != nil {
+			return "", false
+		}
+		file, ok := pageFile[n]
+		if !ok {
+			return "", false
+		}
+		if file == filename {
+			return href, true
+		}
+		// Chapter files live together in text/, so a link between them is
+		// relative to that directory, not to the package root.
+		return strings.TrimPrefix(file, "text/") + href, true
+	}
 }
 
 // assets names and deduplicates figures. The same logo or background often
@@ -871,7 +941,7 @@ func tableText(grid *idm.TableGrid) string {
 }
 
 // chapterXHTML renders the body fragment and reports which pages got anchors.
-func chapterXHTML(ch chapter, assets *assets) (string, []int) {
+func chapterXHTML(ch chapter, assets *assets, filename string, pageFile map[int]string) (string, []int) {
 	var (
 		b        strings.Builder
 		pages    []int
@@ -892,6 +962,7 @@ func chapterXHTML(ch chapter, assets *assets) (string, []int) {
 
 	notes := chapterNotes(ch.paras)
 	refs := chapterRefs(ch.paras, notes)
+	resolve := pageLinkResolver(filename, pageFile)
 
 	for i, p := range ch.paras {
 		for next < len(sections) && sectionStartsAt(sections[next], p) {
@@ -913,7 +984,7 @@ func chapterXHTML(ch chapter, assets *assets) (string, []int) {
 		case p.Kind == idm.KindFootnote && notes[i].id != "":
 			note := notes[i]
 			fmt.Fprintf(&b, "<aside class=\"footnote\" epub:type=\"footnote\" role=\"doc-footnote\" id=\"%s\">\n<p>", note.id)
-			b.WriteString(inlineXHTML(p.Text, p.Spans, nil))
+			b.WriteString(inlineXHTML(p.Text, p.Spans, nil, resolve))
 			if ref := refs.backlinks[note.id]; ref != "" {
 				fmt.Fprintf(&b, ` <a class="backlink" href="#%s" aria-label="Back to text">↩</a>`, ref)
 			}
@@ -927,7 +998,7 @@ func chapterXHTML(ch chapter, assets *assets) (string, []int) {
 		case p.Kind == idm.KindFigure:
 			continue
 		default:
-			fmt.Fprintf(&b, "<p>%s</p>\n", inlineXHTML(p.Text, p.Spans, refs.inline[i]))
+			fmt.Fprintf(&b, "<p>%s</p>\n", inlineXHTML(p.Text, p.Spans, refs.inline[i], resolve))
 		}
 	}
 
