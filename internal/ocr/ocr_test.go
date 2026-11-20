@@ -150,3 +150,22 @@ func TestNewTesseractMissingBinary(t *testing.T) {
 		t.Fatal("NewTesseract() = nil error without a binary")
 	}
 }
+
+func TestLooksLikeText(t *testing.T) {
+	cover := []Line{
+		{Text: "|"}, {Text: "i"}, {Text: "a"}, {Text: "ad"},
+		{Text: "—"}, {Text: "="}, {Text: "="}, {Text: "Fi"},
+	}
+	if LooksLikeText(cover) {
+		t.Error("cover noise was accepted as a text page")
+	}
+
+	prose := []Line{{Text: "It was the best of times, it was the worst of times."}}
+	if !LooksLikeText(prose) {
+		t.Error("a line of prose was rejected")
+	}
+
+	if LooksLikeText(nil) {
+		t.Error("no lines were accepted as text")
+	}
+}

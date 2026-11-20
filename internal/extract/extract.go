@@ -837,6 +837,12 @@ func (e *PDFium) ocrPage(ctx context.Context, page requests.Page, width, height 
 	if err != nil {
 		return nil, err
 	}
+	// A cover or a photograph has shapes, not words. Keeping OCR's handful of
+	// stray letters from it would put noise in the book; the page then counts
+	// as having no text, which is what it is.
+	if !ocr.LooksLikeText(recognized) {
+		return nil, nil
+	}
 
 	imgWidth := float64(rendered.Result.Width)
 	imgHeight := float64(rendered.Result.Height)

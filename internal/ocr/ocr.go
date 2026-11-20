@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // ErrUnavailable means no OCR engine was found on this machine.
@@ -82,6 +83,29 @@ func (t *Tesseract) Recognize(ctx context.Context, png []byte) ([]Line, error) {
 	}
 
 	return parseTSV(out)
+}
+
+// minRecognisedCharacters is the amount of alphanumeric text a page must yield
+// before its OCR output is kept.
+//
+// OCR exists to recover a scanned page's text. Run over artwork — a cover, a
+// photograph, a decorative flourish — it returns a handful of stray letters and
+// symbols, and putting those in the book is worse than an honest blank page.
+// A page of prose produces hundreds of characters; a cover produced six.
+const minRecognisedCharacters = 24
+
+// LooksLikeText reports whether recognised lines carry enough text to be a
+// text page rather than an image with incidental shapes in it.
+func LooksLikeText(lines []Line) bool {
+	count := 0
+	for _, line := range lines {
+		for _, r := range line.Text {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) {
+				count++
+			}
+		}
+	}
+	return count >= minRecognisedCharacters
 }
 
 // parseTSV groups tesseract's word rows into lines.
