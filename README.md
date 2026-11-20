@@ -321,7 +321,14 @@ make deps       # pinned PDFium SDK into .pdfium/ (gitignored)
 make build      # bin/reflow
 make check      # gofmt, go.mod tidy, vet, tests with -race
 make docker     # container image tagged reflow:latest
+
+make run -- serve                              # run from source, no build step
+make run -- convert book.pdf -o book.epub
+make run ARGS='inspect "a file with spaces.pdf"'   # paths with spaces
 ```
+
+`make run --` forwards the words after it to the CLI; a path with spaces needs
+the `ARGS=` form so the shell keeps it together.
 
 `make deps` also fetches EPUBCheck 5.4.0. Tesseract is optional: without it, scanned pages stay
 empty and the report says so. Release archives are produced by `.github/workflows/release.yml` on

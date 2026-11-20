@@ -30,7 +30,7 @@ commands:
   version   print build version information
   help      print this message
 
-Conversion commands are added as the engine lands. See PROPOSAL.md.
+Run "reflow <command> -h" for a command's flags.
 `
 
 func main() {
