@@ -172,6 +172,13 @@ func (c *Converter) Run(ctx context.Context, src io.ReaderAt, size int64, doc Do
 	render.MarkFootnotes(paras, document.Pages)
 	text := render.ParagraphText(paras)
 
+	// A document with no text at all but with something to show is a scan: a
+	// page-image book is a better answer than an error, and its verdict says
+	// what it is.
+	if strings.TrimSpace(text) == "" && hasRenderedContent(document) {
+		return c.facsimile(ctx, src, size, document, password, doc, start, report)
+	}
+
 	report(Progress{Stage: "writing"})
 	book, err := render.Render(document, render.Options{DefaultTitle: titleFallback(doc.Name)})
 	if err != nil {
@@ -190,19 +197,9 @@ func (c *Converter) Run(ctx context.Context, src io.ReaderAt, size int64, doc Do
 
 	quality := score.Evaluate(document, paras, chapters)
 
-	var validation *validate.Report
-	if c.opts.Validator != nil {
-		report(Progress{Stage: "validating"})
-		report, err := c.validate(ctx, buf.Bytes())
-		if err != nil {
-			return Result{}, err
-		}
-		validation = &report
-		if !report.OK() {
-			// Fail closed: an artifact the reference validator rejects is not
-			// a book, and handing it over would waste the reader's time.
-			return Result{}, fmt.Errorf("%w: %s", ErrInvalidOutput, report.Summary())
-		}
+	validation, err := c.checkOutput(ctx, buf.Bytes(), report)
+	if err != nil {
+		return Result{}, err
 	}
 
 	report(Progress{Stage: "done", Done: document.PageCount(), Total: document.PageCount()})
@@ -216,6 +213,100 @@ func (c *Converter) Run(ctx context.Context, src io.ReaderAt, size int64, doc Do
 		Validation: validation,
 		Duration:   time.Since(start),
 	}, nil
+}
+
+// facsimile converts a document with no text into a page-image book.
+func (c *Converter) facsimile(
+	ctx context.Context,
+	src io.ReaderAt,
+	size int64,
+	document idm.Document,
+	password string,
+	doc DocOptions,
+	start time.Time,
+	report func(Progress),
+) (Result, error) {
+	report(Progress{Stage: "rendering"})
+	data, err := c.extractor.RenderPages(ctx, src, size, extract.RenderOptions{
+		Password: password,
+		Progress: func(done, total int) {
+			report(Progress{Stage: "rendering", Done: done, Total: total})
+		},
+	})
+	if err != nil {
+		return Result{}, err
+	}
+
+	pages := make([]render.PageImage, len(data))
+	for i, page := range data {
+		pages[i] = render.PageImage{Number: i + 1, Data: page, MediaType: "image/jpeg"}
+	}
+
+	report(Progress{Stage: "writing"})
+	book, err := render.RenderFacsimile(document, pages, render.Options{
+		DefaultTitle: titleFallback(doc.Name),
+	})
+	if err != nil {
+		return Result{}, err
+	}
+
+	var buf bytes.Buffer
+	if err := epub.Write(&buf, book); err != nil {
+		return Result{}, err
+	}
+
+	chapters := make([]string, len(book.Chapters))
+	for i, ch := range book.Chapters {
+		chapters[i] = ch.Title
+	}
+
+	quality := score.Facsimile(document.PageCount(), len(data), len(chapters))
+
+	validation, err := c.checkOutput(ctx, buf.Bytes(), report)
+	if err != nil {
+		return Result{}, err
+	}
+
+	report(Progress{Stage: "done", Done: document.PageCount(), Total: document.PageCount()})
+	return Result{
+		EPUB:       buf.Bytes(),
+		Pages:      document.PageCount(),
+		Blocks:     len(document.Blocks),
+		Chapters:   chapters,
+		Quality:    quality,
+		Validation: validation,
+		Duration:   time.Since(start),
+	}, nil
+}
+
+// hasRenderedContent reports whether a page-image book would have anything to
+// show: a figure on some page, or an image extraction could not embed but
+// PDFium can still rasterise.
+func hasRenderedContent(doc idm.Document) bool {
+	for _, b := range doc.Blocks {
+		if b.Kind == idm.KindFigure {
+			return true
+		}
+	}
+	return doc.Features.ImagesSkipped > 0
+}
+
+// checkOutput runs the external validator over a finished book and fails
+// closed: an artifact the reference validator rejects is not a book.
+func (c *Converter) checkOutput(ctx context.Context, data []byte, report func(Progress)) (*validate.Report, error) {
+	if c.opts.Validator == nil {
+		return nil, nil
+	}
+
+	report(Progress{Stage: "validating"})
+	result, err := c.validate(ctx, data)
+	if err != nil {
+		return nil, err
+	}
+	if !result.OK() {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidOutput, result.Summary())
+	}
+	return &result, nil
 }
 
 // Convert is a one-shot convenience wrapper for callers without a Converter.
