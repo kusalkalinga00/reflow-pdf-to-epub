@@ -15,6 +15,7 @@ import (
 	"image/png"
 	"io"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -62,6 +63,8 @@ type PDFium struct {
 
 	// skippedImages accumulates images that could not be embedded.
 	skippedImages int
+	// skippedLinks accumulates links whose target cannot be carried over.
+	skippedLinks int
 }
 
 // NewPDFium starts a PDFium pool. Callers must Close it.
@@ -134,8 +137,9 @@ func (e *PDFium) ExtractDoc(ctx context.Context, src io.ReaderAt, size int64, op
 	}
 
 	// The extractor is reused across documents; one document's unreadable
-	// images must not be counted against the next.
+	// images and unusable links must not be counted against the next.
 	e.skippedImages = 0
+	e.skippedLinks = 0
 
 	doc, err := e.instance.OpenDocument(open)
 	if err != nil {
@@ -161,12 +165,13 @@ func (e *PDFium) ExtractDoc(ctx context.Context, src io.ReaderAt, size int64, op
 			return out, err
 		}
 
-		page, blocks, err := e.extractPage(ctx, doc.Document, i)
+		page, blocks, links, err := e.extractPage(ctx, doc.Document, i)
 		if err != nil {
 			return out, fmt.Errorf("page %d: %w", i+1, err)
 		}
 		out.Pages = append(out.Pages, page)
 		out.Blocks = append(out.Blocks, blocks...)
+		out.Links = append(out.Links, links...)
 
 		if opts.Progress != nil {
 			opts.Progress(i+1, count.PageCount)
@@ -175,6 +180,7 @@ func (e *PDFium) ExtractDoc(ctx context.Context, src io.ReaderAt, size int64, op
 
 	out.Features = e.features(doc.Document, count.PageCount)
 	out.Features.ImagesSkipped = e.skippedImages
+	out.Features.LinksSkipped = e.skippedLinks
 
 	if err := out.Validate(); err != nil {
 		return out, err
@@ -182,17 +188,17 @@ func (e *PDFium) ExtractDoc(ctx context.Context, src io.ReaderAt, size int64, op
 	return out, nil
 }
 
-func (e *PDFium) extractPage(ctx context.Context, doc references.FPDF_DOCUMENT, index int) (idm.Page, []idm.Block, error) {
+func (e *PDFium) extractPage(ctx context.Context, doc references.FPDF_DOCUMENT, index int) (idm.Page, []idm.Block, []idm.Link, error) {
 	page := requests.Page{ByIndex: &requests.PageByIndex{Document: doc, Index: index}}
 
 	size, err := e.instance.GetPageSize(&requests.GetPageSize{Page: page})
 	if err != nil {
-		return idm.Page{}, nil, fmt.Errorf("page size: %w", err)
+		return idm.Page{}, nil, nil, fmt.Errorf("page size: %w", err)
 	}
 
 	rotation, err := e.instance.FPDFPage_GetRotation(&requests.FPDFPage_GetRotation{Page: page})
 	if err != nil {
-		return idm.Page{}, nil, fmt.Errorf("page rotation: %w", err)
+		return idm.Page{}, nil, nil, fmt.Errorf("page rotation: %w", err)
 	}
 
 	text, err := e.instance.GetPageTextStructured(&requests.GetPageTextStructured{
@@ -200,7 +206,7 @@ func (e *PDFium) extractPage(ctx context.Context, doc references.FPDF_DOCUMENT, 
 		Mode: requests.GetPageTextStructuredModeChars,
 	})
 	if err != nil {
-		return idm.Page{}, nil, fmt.Errorf("page text: %w", err)
+		return idm.Page{}, nil, nil, fmt.Errorf("page text: %w", err)
 	}
 
 	lines := buildLines(text.Chars)
@@ -221,7 +227,7 @@ func (e *PDFium) extractPage(ctx context.Context, doc references.FPDF_DOCUMENT, 
 	if len(lines) == 0 && e.opts.OCR != nil {
 		recognized, err := e.ocrPage(ctx, page, size.Width, size.Height)
 		if err != nil {
-			return idm.Page{}, nil, fmt.Errorf("ocr: %w", err)
+			return idm.Page{}, nil, nil, fmt.Errorf("ocr: %w", err)
 		}
 		if len(recognized) > 0 {
 			lines = recognized
@@ -229,7 +235,8 @@ func (e *PDFium) extractPage(ctx context.Context, doc references.FPDF_DOCUMENT, 
 		}
 	}
 
-	blocks := append(blocksFromLines(lines, index+1), figures...)
+	links := e.links(doc, page, index+1)
+	blocks := append(blocksFromLines(lines, index+1, links), figures...)
 
 	out := idm.Page{
 		Number:       index + 1,
@@ -240,7 +247,138 @@ func (e *PDFium) extractPage(ctx context.Context, doc references.FPDF_DOCUMENT, 
 		TextCoverage: coverage(lines, size.Width, size.Height),
 	}
 
-	return out, blocks, nil
+	return out, blocks, links, nil
+}
+
+// links recovers the page's hyperlink annotations.
+//
+// A link is a rectangle over text plus a target. External targets must be
+// http(s) or mailto to be carried into the EPUB; javascript:, file: and
+// relative paths are not links a book can safely offer, so they are counted as
+// skipped and the text stays plain. Internal targets keep their page number and
+// are resolved to the book's page anchors at render time.
+func (e *PDFium) links(doc references.FPDF_DOCUMENT, page requests.Page, number int) []idm.Link {
+	var out []idm.Link
+
+	start := 0
+	for {
+		found, err := e.instance.FPDFLink_Enumerate(&requests.FPDFLink_Enumerate{
+			Page:     page,
+			StartPos: start,
+		})
+		if err != nil || found.Link == nil {
+			break
+		}
+		if found.NextStartPos == nil || *found.NextStartPos <= start {
+			break
+		}
+		start = *found.NextStartPos
+
+		rect, err := e.instance.FPDFLink_GetAnnotRect(&requests.FPDFLink_GetAnnotRect{Link: *found.Link})
+		if err != nil || rect.Rect == nil {
+			continue
+		}
+		box := idm.Rect{
+			X0: float64(rect.Rect.Left),
+			Y0: float64(rect.Rect.Bottom),
+			X1: float64(rect.Rect.Right),
+			Y1: float64(rect.Rect.Top),
+		}
+		if !box.Valid() || box.Area() <= 0 {
+			continue
+		}
+
+		target, ok := e.linkTarget(doc, *found.Link)
+		if !ok {
+			e.skippedLinks++
+			continue
+		}
+		target.Page = number
+		target.Rect = box
+		out = append(out, target)
+	}
+
+	return out
+}
+
+// linkTarget resolves one link annotation's destination.
+func (e *PDFium) linkTarget(doc references.FPDF_DOCUMENT, link references.FPDF_LINK) (idm.Link, bool) {
+	if dest, err := e.instance.FPDFLink_GetDest(&requests.FPDFLink_GetDest{
+		Document: doc,
+		Link:     link,
+	}); err == nil && dest.Dest != nil {
+		if index, err := e.instance.FPDFDest_GetDestPageIndex(&requests.FPDFDest_GetDestPageIndex{
+			Document: doc,
+			Dest:     *dest.Dest,
+		}); err == nil && index.Index >= 0 {
+			return idm.Link{TargetPage: index.Index + 1}, true
+		}
+		return idm.Link{}, false
+	}
+
+	action, err := e.instance.FPDFLink_GetAction(&requests.FPDFLink_GetAction{Link: link})
+	if err != nil || action.Action == nil {
+		return idm.Link{}, false
+	}
+
+	kind, err := e.instance.FPDFAction_GetType(&requests.FPDFAction_GetType{Action: *action.Action})
+	if err != nil {
+		return idm.Link{}, false
+	}
+
+	switch kind.Type {
+	case enums.FPDF_ACTION_ACTION_URI:
+		uri, err := e.instance.FPDFAction_GetURIPath(&requests.FPDFAction_GetURIPath{
+			Document: doc,
+			Action:   *action.Action,
+		})
+		if err != nil || uri.URIPath == nil {
+			return idm.Link{}, false
+		}
+		href, ok := safeHref(*uri.URIPath)
+		if !ok {
+			return idm.Link{}, false
+		}
+		return idm.Link{Href: href}, true
+	case enums.FPDF_ACTION_ACTION_GOTO:
+		dest, err := e.instance.FPDFAction_GetDest(&requests.FPDFAction_GetDest{
+			Document: doc,
+			Action:   *action.Action,
+		})
+		if err != nil || dest.Dest == nil {
+			return idm.Link{}, false
+		}
+		index, err := e.instance.FPDFDest_GetDestPageIndex(&requests.FPDFDest_GetDestPageIndex{
+			Document: doc,
+			Dest:     *dest.Dest,
+		})
+		if err != nil || index.Index < 0 {
+			return idm.Link{}, false
+		}
+		return idm.Link{TargetPage: index.Index + 1}, true
+	}
+
+	return idm.Link{}, false
+}
+
+// safeHref keeps the schemes a book can offer and rejects the rest.
+//
+// javascript: and data: in a PDF annotation are content, not instructions to
+// the reader, and carrying them into an EPUB would turn a document into an
+// attack surface. Anchor links are relative and have no meaning across the
+// reflow, so they are skipped too.
+func safeHref(raw string) (string, bool) {
+	href := strings.TrimSpace(raw)
+	if href == "" {
+		return "", false
+	}
+	lower := strings.ToLower(href)
+	for _, scheme := range []string{"http://", "https://", "mailto:"} {
+		if strings.HasPrefix(lower, scheme) {
+			return href, true
+		}
+	}
+	return "", false
 }
 
 // maxStructureElements bounds the walk over the structure tree. Tagged files can
@@ -917,6 +1055,87 @@ func (e *PDFium) metadata(doc references.FPDF_DOCUMENT) idm.Metadata {
 	return meta
 }
 
+// lineSpans builds a line's inline runs from its styled characters.
+//
+// A run breaks where the style changes: raised text starts a superscript, and a
+// link's rectangle starts a link. The characters are copied as they are, so a
+// run can split a word without moving a space — "wand1" stays "wand" + "1".
+func lineSpans(styled []styledPiece, links []idm.Link) []idm.Span {
+	if len(styled) == 0 {
+		return nil
+	}
+
+	var (
+		spans []idm.Span
+		cur   idm.Span
+		open  bool
+	)
+
+	flush := func() {
+		if !open || cur.Text == "" {
+			return
+		}
+		spans = append(spans, cur)
+		cur = idm.Span{}
+		open = false
+	}
+
+	for _, p := range styled {
+		href := hrefAt(p.box, links)
+		if open && (cur.Super != p.super || cur.Href != href) {
+			flush()
+		}
+		cur.Super = p.super
+		cur.Href = href
+		cur.Text += p.text
+		open = true
+	}
+	flush()
+
+	for _, span := range spans {
+		if span.Super || span.Href != "" {
+			return spans
+		}
+	}
+	return nil
+}
+
+// hrefAt is the target of the smallest link whose rectangle holds a glyph.
+//
+// Smallest wins because a link drawn inside another one is the more specific
+// target, and because adjacent rectangles on the same line overlap by a point
+// or two at their edges.
+func hrefAt(box idm.Rect, links []idm.Link) string {
+	var (
+		best  idm.Link
+		found bool
+	)
+	center := func(r idm.Rect) (float64, float64) {
+		return (r.X0 + r.X1) / 2, (r.Y0 + r.Y1) / 2
+	}
+	x, y := center(box)
+
+	for _, link := range links {
+		if x < link.Rect.X0 || x > link.Rect.X1 || y < link.Rect.Y0 || y > link.Rect.Y1 {
+			continue
+		}
+		if found && link.Rect.Area() >= best.Rect.Area() {
+			continue
+		}
+		best, found = link, true
+	}
+	if !found {
+		return ""
+	}
+	if best.External() {
+		return best.Href
+	}
+	if best.TargetPage > 0 {
+		return "#page-" + strconv.Itoa(best.TargetPage)
+	}
+	return ""
+}
+
 // joinedSpans is the text a span list describes.
 func joinedSpans(spans []idm.Span) string {
 	var b strings.Builder
@@ -934,7 +1153,7 @@ func wordTexts(words []word) []string {
 	return out
 }
 
-func blocksFromLines(lines []line, page int) []idm.Block {
+func blocksFromLines(lines []line, page int, links []idm.Link) []idm.Block {
 	blocks := make([]idm.Block, 0, len(lines))
 	for _, l := range lines {
 		words := make([]idm.Word, len(l.words))
@@ -949,7 +1168,7 @@ func blocksFromLines(lines []line, page int) []idm.Block {
 			text = strings.Join(wordTexts(l.words), " ")
 		}
 
-		spans := l.spans
+		spans := lineSpans(l.styled, links)
 		if joinedSpans(spans) != text {
 			// Styling that cannot reconstruct the text exactly is dropped:
 			// the text is authoritative and a mismatch fails validation.

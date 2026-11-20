@@ -19,9 +19,18 @@ type line struct {
 	// words are the line's word boxes, in order. They are what table detection
 	// and footnote finding need; the line text is a convenience for readers.
 	words []word
-	// spans carry inline styling, when the line has any. They concatenate to
-	// the line text exactly.
-	spans []idm.Span
+	// styled carries every character of the line with its inline style, when
+	// the line has any styling at all. It is what links and superscripts are
+	// built from: the characters keep their exact spacing, so a styled run can
+	// split a word without moving a space.
+	styled []styledPiece
+}
+
+// styledPiece is one character with its box and whether it is raised.
+type styledPiece struct {
+	text  string
+	box   idm.Rect
+	super bool
 }
 
 type word struct {
@@ -207,6 +216,12 @@ func joinPieces(pieces []piece) line {
 
 	size := capHeight(pieces, box)
 	baseline, _ := baselineOf(pieces)
+	super := pieceStyles(pieces, size, baseline)
+
+	styled := make([]styledPiece, len(pieces))
+	for i, p := range pieces {
+		styled[i] = styledPiece{text: p.text, box: p.box, super: super[i]}
+	}
 
 	return line{
 		text:       text,
@@ -214,7 +229,7 @@ func joinPieces(pieces []piece) line {
 		fontSize:   size,
 		confidence: 1,
 		words:      wordBoxes(pieces),
-		spans:      superscriptSpans(pieces, size, baseline),
+		styled:     styled,
 	}
 }
 
@@ -300,29 +315,32 @@ func wordBoxes(pieces []piece) []word {
 // baseline, and lifting them would corrupt text throughout the book. So a run
 // must be small, raised, short, attached to the word before it, and made of
 // digits, note marks, or an ordinal suffix. Everything else stays plain text.
-func superscriptSpans(pieces []piece, size, baseline float64) []idm.Span {
+// pieceStyles marks each piece of a line as raised annotation or ordinary text.
+//
+// The rules are narrow because a false positive is visible: quote marks, hyphens
+// and the asterisk in a code sample are small glyphs whose ink sits above the
+// baseline, and lifting them would corrupt text throughout the book. So a run
+// must be small, raised, short, attached to the word before it, and made of
+// digits, note marks, or an ordinal suffix. Everything else stays plain text.
+func pieceStyles(pieces []piece, size, baseline float64) []bool {
+	super := make([]bool, len(pieces))
 	if size <= 0 {
-		return nil
+		return super
 	}
 
 	var (
-		spans []idm.Span
-		begin int
-		super bool
+		begin  int
+		raised bool
 	)
 
 	flush := func(end int) {
-		if end <= begin {
+		if end <= begin || !raised {
 			return
 		}
 
 		run := pieces[begin:end]
 		text := pieceText(run)
-		var before piece
-		if begin > 0 {
-			before = pieces[begin-1]
-		}
-		marked := super && looksLikeSuperscript(text, run, before, size)
+		marked := looksLikeSuperscript(text, run, pieceBefore(pieces, begin), size)
 		if marked && begin > 0 {
 			marked = attachedTo(pieces[begin-1], run[0], size)
 		}
@@ -332,46 +350,96 @@ func superscriptSpans(pieces []piece, size, baseline float64) []idm.Span {
 			// lifted by a font quirk rather than set as annotation.
 			marked = false
 		}
-
-		span := idm.Span{Text: text}
-		if marked {
-			span.Super = true
+		if !marked {
+			return
 		}
-		spans = append(spans, span)
+		for i := begin; i < end; i++ {
+			if strings.TrimSpace(pieces[i].text) != "" {
+				super[i] = true
+			}
+		}
 	}
 
 	for i, p := range pieces {
 		if strings.TrimSpace(p.text) == "" {
 			// A space ends a raised run: the marker is the glyphs only, and
 			// the space belongs to the text that follows it.
-			if super && begin < i {
+			if raised && begin < i {
 				flush(i)
 				begin = i
-				super = false
+				raised = false
 			}
 			continue
 		}
 
-		raised := p.box.Height() > 0 &&
+		up := p.box.Height() > 0 &&
 			p.box.Height() <= 0.8*size &&
 			p.box.Y0 >= baseline+0.25*size
 
-		if begin < i && raised != super {
+		if begin < i && up != raised {
 			flush(i)
 			begin = i
 		}
 		if begin == i {
-			super = raised
+			raised = up
 		}
 	}
 	flush(len(pieces))
 
-	for _, span := range spans {
-		if span.Super {
-			return spans
-		}
+	return super
+}
+
+// pieceBefore is the piece before index, or the zero piece at the start of a
+// line.
+func pieceBefore(pieces []piece, index int) piece {
+	if index == 0 {
+		return piece{}
 	}
-	return nil
+	return pieces[index-1]
+}
+
+// superscriptSpans is the span form of pieceStyles, used by tests and by any
+// caller that does not need link geometry.
+func superscriptSpans(pieces []piece, size, baseline float64) []idm.Span {
+	styles := pieceStyles(pieces, size, baseline)
+
+	var (
+		spans []idm.Span
+		cur   strings.Builder
+		super bool
+		open  bool
+	)
+	flush := func() {
+		if !open || cur.Len() == 0 {
+			return
+		}
+		spans = append(spans, idm.Span{Text: cur.String(), Super: super})
+		cur.Reset()
+		open = false
+	}
+	sawSuper := false
+	for i, p := range pieces {
+		if strings.TrimSpace(p.text) == "" {
+			cur.WriteString(p.text)
+			continue
+		}
+		if !open {
+			super, open = styles[i], true
+		} else if styles[i] != super {
+			flush()
+			super, open = styles[i], true
+		}
+		if super {
+			sawSuper = true
+		}
+		cur.WriteString(p.text)
+	}
+	flush()
+
+	if !sawSuper {
+		return nil
+	}
+	return spans
 }
 
 // endsInDigit reports whether a piece ends in a digit.

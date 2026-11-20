@@ -191,7 +191,31 @@ type Features struct {
 	// ImagesSkipped counts image objects the extraction could not embed, for
 	// example JPEG 2000, which EPUB does not support.
 	ImagesSkipped int `json:"imagesSkipped,omitempty"`
+	// LinksSkipped counts links whose target cannot be carried into an EPUB,
+	// such as javascript: URIs or links to another file.
+	LinksSkipped int `json:"linksSkipped,omitempty"`
 }
+
+// Link is a hyperlink annotation from the source document.
+//
+// A link is geometry plus a target: the rectangle the producer drew over the
+// text, and either an absolute URL or a destination page. Both are needed to
+// rebuild the link, because the text inside the rectangle is what the reader
+// sees and clicks.
+type Link struct {
+	// Page is the 1-based page the annotation sits on.
+	Page int `json:"page"`
+	// Rect is the clickable area in PDF user space.
+	Rect Rect `json:"rect"`
+	// Href is an absolute URL, for a link that leaves the document.
+	Href string `json:"href,omitempty"`
+	// TargetPage is the 1-based destination page, for a link inside the
+	// document. Zero for an external link.
+	TargetPage int `json:"targetPage,omitempty"`
+}
+
+// External reports whether the link leaves the document.
+func (l Link) External() bool { return l.Href != "" }
 
 // Document is a whole source document.
 type Document struct {
@@ -199,6 +223,7 @@ type Document struct {
 	Pages    []Page         `json:"pages"`
 	Blocks   []Block        `json:"blocks"`
 	Outline  []OutlineEntry `json:"outline,omitempty"`
+	Links    []Link         `json:"links,omitempty"`
 	Features Features       `json:"features,omitempty"`
 }
 
