@@ -630,3 +630,77 @@ func TestParagraphTextIncludesTableCells(t *testing.T) {
 		t.Errorf("ParagraphText = %q, want %q", got, want)
 	}
 }
+
+func TestRenderGivesOpeningFiguresToTheChapterBelow(t *testing.T) {
+	// A novel's banner and illustration are drawn above the chapter title,
+	// and the bookmark points at the title. They must open the chapter, not
+	// close the one before it — which for the first chapter is the cover.
+	doc := document([]idm.Block{
+		line("Cover text.", 1, 700, 710, 10),
+		{
+			Kind: idm.KindFigure, Page: 2,
+			BBox:       idm.Rect{X0: 40, Y0: 420, X1: 320, Y1: 600},
+			Confidence: 1,
+			Image:      &idm.Image{Data: []byte("banner"), MediaType: "image/jpeg"},
+		},
+		line("Chapter one text.", 2, 300, 360, 10),
+		line("Chapter two text.", 4, 700, 710, 10),
+	}, 4)
+	doc.Outline = []idm.OutlineEntry{
+		{Title: "Chapter One", Page: 2, Level: 1, Y: 370},
+		{Title: "Chapter Two", Page: 4, Level: 1, Y: 720},
+	}
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	if got := chapterTitlesOf(book); len(got) != 3 || got[0] != "Front matter" || got[1] != "Chapter One" {
+		t.Fatalf("chapters = %v", got)
+	}
+	if strings.Contains(book.Chapters[0].Body, "<figure>") {
+		t.Error("the opening figure stayed with the front matter")
+	}
+
+	body := book.Chapters[1].Body
+	figure := strings.Index(body, "<figure>")
+	text := strings.Index(body, "Chapter one text.")
+	if figure < 0 || text < 0 || figure > text {
+		t.Errorf("figure is not before the chapter text:\n%s", body)
+	}
+}
+
+func TestRenderKeepsAFigureWithTheChapterItEnds(t *testing.T) {
+	// The previous chapter continues onto the page, so a figure above the next
+	// heading belongs to the chapter that is ending.
+	doc := document([]idm.Block{
+		line("Chapter one opening.", 2, 700, 710, 10),
+		line("Chapter one ends here.", 3, 620, 630, 10),
+		{
+			Kind: idm.KindFigure, Page: 3,
+			BBox:       idm.Rect{X0: 40, Y0: 400, X1: 320, Y1: 500},
+			Confidence: 1,
+			Image:      &idm.Image{Data: []byte("end-art"), MediaType: "image/jpeg"},
+		},
+		line("Chapter two text.", 3, 300, 360, 10),
+		line("Chapter three text.", 4, 700, 710, 10),
+	}, 4)
+	doc.Outline = []idm.OutlineEntry{
+		{Title: "Chapter One", Page: 2, Level: 1, Y: 720},
+		{Title: "Chapter Two", Page: 3, Level: 1, Y: 370},
+		{Title: "Chapter Three", Page: 4, Level: 1, Y: 700},
+	}
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	if !strings.Contains(book.Chapters[0].Body, "<figure>") {
+		t.Error("a figure that ends chapter one was moved to the next chapter")
+	}
+	if strings.Contains(book.Chapters[1].Body, "<figure>") {
+		t.Error("chapter two took a figure that belongs to the previous chapter")
+	}
+}
