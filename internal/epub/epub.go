@@ -109,6 +109,13 @@ aside.footnote p {
 a.backlink {
   text-decoration: none;
 }
+figure.page {
+  margin: 0;
+  text-align: center;
+}
+figure.page img {
+  width: 100%;
+}
 `
 
 // Book is everything the writer needs. The zero value is invalid: a book needs
