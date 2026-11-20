@@ -15,8 +15,6 @@ const passwordRow = document.getElementById("password-row");
 const passwordInput = document.getElementById("password");
 const submitLabel = document.getElementById("submit-label");
 const reportToggle = document.getElementById("report");
-const openFile = document.getElementById("open-file");
-const coreVersion = document.getElementById("core-version");
 const progressWrap = document.getElementById("progress-wrap");
 const progress = document.getElementById("progress");
 const progressLabel = document.getElementById("progress-label");
@@ -308,26 +306,6 @@ function tierLabel(tier) {
   if (tier === "T3") return "Low confidence";
   return "Converted";
 }
-
-openFile.addEventListener("click", () => input.click());
-
-window.addEventListener("keydown", (event) => {
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "o") {
-    event.preventDefault();
-    input.click();
-  }
-});
-
-fetch("/api/version")
-  .then((response) => (response.ok ? response.json() : null))
-  .then((data) => {
-    if (data && data.version && coreVersion) {
-      coreVersion.textContent = "Core " + data.version;
-    }
-  })
-  .catch(() => {
-    /* the badge is decoration; the page works without it */
-  });
 
 async function conversionError(response) {
   try {

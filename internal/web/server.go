@@ -24,7 +24,6 @@ import (
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ingest"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/render"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/version"
 )
 
 //go:embed static
@@ -84,7 +83,6 @@ func New(converter Converter, opts Options) *Server {
 	mux.HandleFunc("GET /api/jobs/{id}", s.handleJobStatus)
 	mux.HandleFunc("GET /api/jobs/{id}/epub", s.handleJobEPUB)
 	mux.HandleFunc("DELETE /api/jobs/{id}", s.handleJobCancel)
-	mux.HandleFunc("GET /api/version", s.handleVersion)
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.Handle("/", s.staticHandler())
 
@@ -102,18 +100,6 @@ func (s *Server) staticHandler() http.Handler {
 		panic(err)
 	}
 	return http.FileServer(http.FS(sub))
-}
-
-// handleVersion reports the build the page is talking to. The UI shows it in
-// the title bar; it is also the quickest way to check that a rebuild is live.
-func (s *Server) handleVersion(w http.ResponseWriter, _ *http.Request) {
-	v := version.Version
-	if v == "" {
-		v = "dev"
-	}
-	writeJSON(w, http.StatusOK, struct {
-		Version string `json:"version"`
-	}{Version: v})
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
