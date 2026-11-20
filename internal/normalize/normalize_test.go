@@ -231,4 +231,12 @@ func TestApplyKeepsSpansConsistentWithText(t *testing.T) {
 	if err := out.Validate(); err != nil {
 		t.Errorf("spans no longer reconstruct the text: %v", err)
 	}
+
+	spans := out.Blocks[0].Spans
+	if len(spans) != 3 {
+		t.Fatalf("spans = %+v, want the three runs kept", spans)
+	}
+	if !spans[1].Italic || spans[1].Text != "efficient" {
+		t.Errorf("italic run = %+v, want the ligature repaired inside it", spans[1])
+	}
 }

@@ -201,3 +201,92 @@ func TestCapHeightIsStableWithDescendersAndQuotes(t *testing.T) {
 		}
 	}
 }
+
+// glyph is one piece of a line under construction.
+func glyph(text string, x, bottom, top float64) piece {
+	return piece{text: text, box: idm.Rect{X0: x, Y0: bottom, X1: x + 4, Y1: top}}
+}
+
+func TestLineMarksARaisedMarkerAsSuperscript(t *testing.T) {
+	pieces := []piece{
+		glyph("w", 100, 700, 710), glyph("a", 104, 700, 710),
+		glyph("n", 108, 700, 710), glyph("d", 112, 700, 710),
+		glyph(".", 116, 700, 710),
+		glyph("1", 120, 703, 709), glyph("2", 122, 703, 709),
+		glyph(" ", 126, 700, 710),
+		glyph("x", 130, 700, 710),
+	}
+
+	l := joinPieces(pieces)
+	if l.text != "wand.12 x" {
+		t.Fatalf("text = %q", l.text)
+	}
+
+	var supers []string
+	for _, s := range l.spans {
+		if s.Super {
+			supers = append(supers, s.Text)
+		}
+	}
+	if len(supers) != 1 || supers[0] != "12" {
+		t.Fatalf("superscript spans = %v, want [12]", supers)
+	}
+	if got := joinedSpans(l.spans); got != l.text {
+		t.Errorf("spans describe %q, text is %q", got, l.text)
+	}
+}
+
+func TestLineDoesNotLiftPunctuation(t *testing.T) {
+	// Quotes and apostrophes have small ink boxes sitting above the baseline.
+	// Lifting them would lift punctuation throughout the book.
+	pieces := []piece{
+		glyph("d", 100, 700, 710), glyph("o", 104, 700, 710),
+		glyph("n", 108, 700, 710),
+		glyph("'", 112, 706, 709),
+		glyph("t", 114, 700, 710),
+	}
+
+	l := joinPieces(pieces)
+	for _, s := range l.spans {
+		if s.Super {
+			t.Fatalf("punctuation was lifted: %+v", s)
+		}
+	}
+}
+
+func TestLineDoesNotLiftAnAsteriskInsideAWord(t *testing.T) {
+	// In code, an asterisk is multiplied by the next token. A note mark ends a
+	// word; this one does not.
+	pieces := []piece{
+		glyph("a", 100, 700, 710), glyph("*", 104, 703, 707),
+		glyph("b", 106, 700, 710),
+	}
+
+	l := joinPieces(pieces)
+	for _, s := range l.spans {
+		if s.Super {
+			t.Fatalf("an asterisk inside a word was lifted: %+v", s)
+		}
+	}
+}
+
+func TestLineMarksAnOrdinalSuffix(t *testing.T) {
+	pieces := []piece{
+		glyph("2", 100, 700, 710),
+		glyph("n", 104, 703, 707), glyph("d", 106, 703, 707),
+		glyph(" ", 110, 700, 710),
+		glyph("f", 114, 700, 710), glyph("l", 118, 700, 710),
+		glyph("o", 122, 700, 710), glyph("o", 126, 700, 710), glyph("r", 130, 700, 710),
+	}
+
+	l := joinPieces(pieces)
+	var supers []string
+	for _, s := range l.spans {
+		if s.Super {
+			supers = append(supers, s.Text)
+		}
+	}
+	if len(supers) != 1 || supers[0] != "nd" {
+		t.Fatalf("superscript spans = %v, want [nd]", supers)
+	}
+}
