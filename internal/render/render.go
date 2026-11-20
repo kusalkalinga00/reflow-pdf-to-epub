@@ -40,6 +40,7 @@ func Render(doc idm.Document, opts Options) (epub.Book, error) {
 	if len(paras) == 0 {
 		return epub.Book{}, ErrNoText
 	}
+	markFootnotes(paras, doc.Pages)
 
 	title := titleOf(doc, opts)
 	chapters := buildChapters(paras, title, doc.Outline)
@@ -214,6 +215,135 @@ func withoutPage(paras []Paragraph, page int) []Paragraph {
 func insideBox(inner, outer idm.Rect, margin float64) bool {
 	return inner.X0 >= outer.X0-margin && inner.X1 <= outer.X1+margin &&
 		inner.Y0 >= outer.Y0-margin && inner.Y1 <= outer.Y1+margin
+}
+
+// footnote is one note in a chapter, with the id it is rendered under.
+type footnote struct {
+	index  int
+	marker string
+	page   int
+	id     string
+}
+
+// chapterNotes finds the chapter's footnotes and numbers them.
+func chapterNotes(paras []Paragraph) map[int]footnote {
+	notes := make(map[int]footnote)
+	n := 0
+	for i := range paras {
+		if paras[i].Kind != idm.KindFootnote {
+			continue
+		}
+		n++
+		marker, _ := footnoteMarker(&paras[i])
+		notes[i] = footnote{
+			index:  i,
+			marker: marker,
+			page:   paras[i].Page,
+			id:     "fn-" + strconv.Itoa(n),
+		}
+	}
+	return notes
+}
+
+// noteref is a link from a reference in the text to its note.
+type noteref struct {
+	marker string
+	noteID string
+	refID  string
+}
+
+// references is the chapter's resolved note links.
+type references struct {
+	// inline maps a paragraph index to the note its marker points at.
+	inline map[int]*noteref
+	// backlinks maps a note id to the anchor the backlink returns to.
+	backlinks map[string]string
+}
+
+// chapterRefs links footnote references to their notes.
+//
+// A reference is a raised marker in the text on the same page as the note, in a
+// paragraph before it. That is a narrow rule on purpose: a link that jumps to
+// the wrong note is worse than no link, so anything ambiguous is left as plain
+// superscript text.
+func chapterRefs(paras []Paragraph, notes map[int]footnote) references {
+	refs := references{inline: make(map[int]*noteref), backlinks: make(map[string]string)}
+
+	used := make(map[string]bool, len(notes))
+	for i := range paras {
+		p := &paras[i]
+		if p.Kind != idm.KindParagraph || len(p.Spans) == 0 || spanText(p.Spans) != p.Text {
+			continue
+		}
+
+		for _, span := range p.Spans {
+			if !span.Super {
+				continue
+			}
+			marker := strings.TrimSpace(span.Text)
+
+			var match *footnote
+			for _, note := range notes {
+				if note.marker != marker || note.page != p.Page || note.index <= i || used[note.id] {
+					continue
+				}
+				if match != nil {
+					// Two candidates: leave it unlinked rather than guess.
+					match = nil
+					marker = ""
+					break
+				}
+				n := note
+				match = &n
+			}
+			if match == nil || marker == "" {
+				continue
+			}
+
+			ref := &noteref{marker: marker, noteID: match.id, refID: "ref-" + match.id}
+			refs.inline[i] = ref
+			refs.backlinks[match.id] = ref.refID
+			used[match.id] = true
+			break
+		}
+	}
+
+	return refs
+}
+
+// inlineXHTML renders a paragraph's text with its inline styling.
+//
+// The spans are used only when they reconstruct the text exactly: a mismatch
+// means the styling no longer describes the paragraph, and plain text is
+// better than markup that moves or loses a word.
+func inlineXHTML(text string, spans []idm.Span, ref *noteref) string {
+	if len(spans) == 0 || spanText(spans) != text {
+		return escape(text)
+	}
+
+	var b strings.Builder
+	for _, s := range spans {
+		switch {
+		case s.Super && ref != nil && strings.TrimSpace(s.Text) == ref.marker:
+			fmt.Fprintf(&b, `<a class="noteref" epub:type="noteref" role="doc-noteref" id="%s" href="#%s"><sup>%s</sup></a>`,
+				ref.refID, ref.noteID, escape(s.Text))
+		case s.Super:
+			b.WriteString("<sup>")
+			b.WriteString(escape(s.Text))
+			b.WriteString("</sup>")
+		case s.Bold:
+			b.WriteString("<strong>")
+			b.WriteString(escape(s.Text))
+			b.WriteString("</strong>")
+		case s.Italic:
+			b.WriteString("<em>")
+			b.WriteString(escape(s.Text))
+			b.WriteString("</em>")
+		default:
+			b.WriteString(escape(s.Text))
+		}
+	}
+	return b.String()
 }
 
 // assets names and deduplicates figures. The same logo or background often
@@ -760,7 +890,10 @@ func chapterXHTML(ch chapter, assets *assets) (string, []int) {
 	})
 	next := 0
 
-	for _, p := range ch.paras {
+	notes := chapterNotes(ch.paras)
+	refs := chapterRefs(ch.paras, notes)
+
+	for i, p := range ch.paras {
 		for next < len(sections) && sectionStartsAt(sections[next], p) {
 			b.WriteString(sectionAnchorHTML(sections[next]))
 			b.WriteByte('\n')
@@ -777,6 +910,14 @@ func chapterXHTML(ch chapter, assets *assets) (string, []int) {
 		}
 
 		switch {
+		case p.Kind == idm.KindFootnote && notes[i].id != "":
+			note := notes[i]
+			fmt.Fprintf(&b, "<aside class=\"footnote\" epub:type=\"footnote\" role=\"doc-footnote\" id=\"%s\">\n<p>", note.id)
+			b.WriteString(inlineXHTML(p.Text, p.Spans, nil))
+			if ref := refs.backlinks[note.id]; ref != "" {
+				fmt.Fprintf(&b, ` <a class="backlink" href="#%s" aria-label="Back to text">↩</a>`, ref)
+			}
+			b.WriteString("</p>\n</aside>\n")
 		case p.Kind == idm.KindHeading:
 			fmt.Fprintf(&b, "<h%d>%s</h%d>\n", p.Level, escape(p.Text), p.Level)
 		case p.Kind == idm.KindTable && p.Table != nil:
@@ -786,7 +927,7 @@ func chapterXHTML(ch chapter, assets *assets) (string, []int) {
 		case p.Kind == idm.KindFigure:
 			continue
 		default:
-			fmt.Fprintf(&b, "<p>%s</p>\n", escape(p.Text))
+			fmt.Fprintf(&b, "<p>%s</p>\n", inlineXHTML(p.Text, p.Spans, refs.inline[i]))
 		}
 	}
 
