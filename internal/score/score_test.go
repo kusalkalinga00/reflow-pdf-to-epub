@@ -368,3 +368,28 @@ func TestAPageWithARecoveredFigureIsNotBlank(t *testing.T) {
 		t.Errorf("score = %d, want 100", report.Score)
 	}
 }
+
+func TestFacsimileBookScoresT3(t *testing.T) {
+	report := score.Facsimile(10, 10, 3)
+
+	if report.Tier != score.TierFacsimile {
+		t.Errorf("tier = %q, want T3", report.Tier)
+	}
+	if report.Score != 65 {
+		t.Errorf("score = %d, want 65 (the page-image loss)", report.Score)
+	}
+	if !hasIssue(report, "PAGE_IMAGES") {
+		t.Errorf("issues = %v, want PAGE_IMAGES", report.Issues)
+	}
+}
+
+func TestFacsimileBookReportsPagesItCouldNotRender(t *testing.T) {
+	report := score.Facsimile(10, 8, 2)
+
+	if report.Score != 55 {
+		t.Errorf("score = %d, want 55", report.Score)
+	}
+	if !hasIssue(report, "PAGES_MISSING") {
+		t.Errorf("issues = %v, want PAGES_MISSING", report.Issues)
+	}
+}

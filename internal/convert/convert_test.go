@@ -5,6 +5,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"image"
+	"image/jpeg"
 	"io"
 	"strings"
 	"sync"
@@ -250,4 +252,53 @@ func hasIssue(report score.Report, code string) bool {
 		}
 	}
 	return false
+}
+
+func TestScannedDocumentBecomesAPageImageBook(t *testing.T) {
+	// A page with a picture and no text at all is a scan, not a failure.
+	img := image.NewRGBA(image.Rect(0, 0, 64, 64))
+	for i := 0; i < len(img.Pix); i += 4 {
+		img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = 200, 200, 200, 255
+	}
+	var jpegBytes bytes.Buffer
+	if err := jpeg.Encode(&jpegBytes, img, &jpeg.Options{Quality: 85}); err != nil {
+		t.Fatalf("encode fixture: %v", err)
+	}
+
+	pdf := testpdf.Build(1, testpdf.WithPages(nil), testpdf.WithImage(jpegBytes.Bytes(), 64, 64, 400, 400))
+
+	converter, err := convert.New(convert.Options{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer converter.Close()
+
+	result, err := converter.Run(context.Background(), bytes.NewReader(pdf), int64(len(pdf)), convert.DocOptions{Name: "scan.pdf"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if result.Quality.Tier != score.TierFacsimile {
+		t.Errorf("tier = %q, want T3", result.Quality.Tier)
+	}
+	if result.Quality.Score != 65 {
+		t.Errorf("score = %d, want 65", result.Quality.Score)
+	}
+	if len(result.Chapters) != 1 || result.Chapters[0] != "Pages" {
+		t.Errorf("chapters = %v, want [Pages]", result.Chapters)
+	}
+
+	zr, err := zip.NewReader(bytes.NewReader(result.EPUB), int64(len(result.EPUB)))
+	if err != nil {
+		t.Fatalf("epub is not a zip: %v", err)
+	}
+	found := false
+	for _, f := range zr.File {
+		if f.Name == "OEBPS/images/page-001.jpg" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the rendered page is not in the book")
+	}
 }

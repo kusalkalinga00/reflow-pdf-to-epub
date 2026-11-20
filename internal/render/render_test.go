@@ -903,3 +903,55 @@ func TestRenderFindsACoverBesideAPublisherMark(t *testing.T) {
 		t.Errorf("chapters = %v, want the two chapters", got)
 	}
 }
+
+func TestRenderFacsimileUsesTheOutlineAndAcover(t *testing.T) {
+	doc := idm.Document{
+		Meta: idm.Metadata{Title: "Scanned Book", Language: "en"},
+		Pages: []idm.Page{
+			{Number: 1, Width: 595, Height: 842},
+			{Number: 2, Width: 595, Height: 842},
+			{Number: 3, Width: 595, Height: 842},
+			{Number: 4, Width: 595, Height: 842},
+		},
+		Outline: []idm.OutlineEntry{
+			{Title: "Chapter One", Page: 2, Level: 1},
+			{Title: "Chapter Two", Page: 4, Level: 1},
+		},
+	}
+
+	pages := []PageImage{
+		{Number: 1, Data: []byte("one"), MediaType: "image/jpeg"},
+		{Number: 2, Data: []byte("two"), MediaType: "image/jpeg"},
+		{Number: 3, Data: []byte("three"), MediaType: "image/jpeg"},
+		{Number: 4, Data: []byte("four"), MediaType: "image/jpeg"},
+	}
+
+	book, err := RenderFacsimile(doc, pages, Options{})
+	if err != nil {
+		t.Fatalf("RenderFacsimile: %v", err)
+	}
+
+	if book.Cover == nil || string(book.Cover.Data) != "one" {
+		t.Fatalf("cover = %+v, want page one", book.Cover)
+	}
+	if titles := chapterTitlesOf(book); len(titles) != 2 || titles[0] != "Chapter One" || titles[1] != "Chapter Two" {
+		t.Fatalf("chapters = %v", titles)
+	}
+	if len(book.Chapters[0].Body) == 0 || !strings.Contains(book.Chapters[0].Body, "page-002.jpg") {
+		t.Errorf("chapter one body = %q", book.Chapters[0].Body)
+	}
+	if len(book.PageList) != 3 {
+		t.Errorf("page list = %d entries, want 3 (the cover is not a reading page)", len(book.PageList))
+	}
+	for _, want := range []string{"page-002.jpg", "page-003.jpg", "page-004.jpg"} {
+		found := false
+		for _, img := range book.Images {
+			if img.Name == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("missing image %q", want)
+		}
+	}
+}

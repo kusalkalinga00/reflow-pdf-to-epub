@@ -209,6 +209,8 @@ function renderProgress(state) {
     label = "Reading page " + state.done + " of " + state.total;
   } else if (state.stage === "reading") {
     label = "Opening the PDF…";
+  } else if (state.stage === "rendering" && state.total > 0) {
+    label = "Rendering page " + state.done + " of " + state.total;
   } else if (state.stage === "laying out") {
     label = "Laying out pages…";
   } else if (state.stage === "writing") {
@@ -329,7 +331,7 @@ function delay(ms) {
 function tierLabel(tier) {
   if (tier === "T1") return "Structured";
   if (tier === "T2") return "Reflowed";
-  if (tier === "T3") return "Low confidence";
+  if (tier === "T3") return "Facsimile";
   return "Converted";
 }
 
