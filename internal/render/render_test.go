@@ -711,7 +711,7 @@ func TestRenderTreatsALoneFirstPageFigureAsTheCover(t *testing.T) {
 	// a blank page before the first chapter.
 	doc := document([]idm.Block{
 		{Kind: idm.KindFigure, Page: 1,
-			BBox:       idm.Rect{X0: 100, Y0: 200, X1: 500, Y1: 700},
+			BBox:       idm.Rect{X0: 0, Y0: 0, X1: 595, Y1: 842},
 			Confidence: 1,
 			Image:      &idm.Image{Data: []byte("cover"), MediaType: "image/jpeg"}},
 		line("Chapter one text.", 2, 700, 710, 10),
@@ -770,5 +770,70 @@ func TestRenderKeepsATitlePageThatCarriesText(t *testing.T) {
 	}
 	if len(book.Images) != 1 {
 		t.Errorf("images = %d, want the title-page art kept as a figure", len(book.Images))
+	}
+}
+
+func TestRenderTakesACoverWhoseTitleIsOnTheArtwork(t *testing.T) {
+	// A scanned cover has no text layer, so OCR reads the title printed on the
+	// artwork. Those lines sit inside the figure: they are part of the cover,
+	// not a separate title page, and must not become one.
+	doc := document([]idm.Block{
+		{Kind: idm.KindFigure, Page: 1,
+			BBox:       idm.Rect{X0: 0, Y0: 0, X1: 595, Y1: 842},
+			Confidence: 1,
+			Image:      &idm.Image{Data: []byte("cover-art"), MediaType: "image/jpeg"}},
+		line("HARRY", 1, 700, 740, 36),
+		line("POTTER", 1, 600, 640, 36),
+		line("Chapter one text.", 2, 700, 710, 10),
+		line("Chapter two text.", 3, 700, 710, 10),
+	}, 3)
+	doc.Outline = []idm.OutlineEntry{
+		{Title: "Chapter One", Page: 2, Level: 1, Y: 720},
+		{Title: "Chapter Two", Page: 3, Level: 1, Y: 720},
+	}
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	if book.Cover == nil || string(book.Cover.Data) != "cover-art" {
+		t.Fatalf("cover = %+v, want the page-one artwork", book.Cover)
+	}
+	if titles := chapterTitlesOf(book); len(titles) != 2 {
+		t.Fatalf("chapters = %v, want the two outline chapters", titles)
+	}
+	for _, ch := range book.Chapters {
+		if strings.Contains(ch.Body, "HARRY") || strings.Contains(ch.Body, "POTTER") {
+			t.Errorf("OCR text from the cover became chapter text:\n%s", ch.Body)
+		}
+	}
+}
+
+func TestRenderKeepsATitlePageBeneathAnIllustration(t *testing.T) {
+	// Text outside the figure is a title page, not cover artwork.
+	doc := document([]idm.Block{
+		{Kind: idm.KindFigure, Page: 1,
+			BBox:       idm.Rect{X0: 0, Y0: 0, X1: 595, Y1: 600},
+			Confidence: 1,
+			Image:      &idm.Image{Data: []byte("art"), MediaType: "image/jpeg"}},
+		line("The Book Title", 1, 620, 660, 24),
+		line("Chapter one text.", 2, 700, 710, 10),
+		line("Chapter two text.", 3, 700, 710, 10),
+	}, 3)
+	doc.Outline = []idm.OutlineEntry{
+		{Title: "Chapter One", Page: 2, Level: 1, Y: 720},
+		{Title: "Chapter Two", Page: 3, Level: 1, Y: 720},
+	}
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if book.Cover != nil {
+		t.Error("a title page with text outside the figure was taken as a cover")
+	}
+	if !strings.Contains(book.Chapters[0].Body, "The Book Title") {
+		t.Error("the title page text was dropped")
 	}
 }
