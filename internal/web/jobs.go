@@ -86,6 +86,16 @@ func (j *job) status() jobStatus {
 	if j.err != nil {
 		s.Error = convert.Explain(j.err)
 		s.Code = errorCode(j.err)
+
+		// The page asks for a password when it sees this code, so the message
+		// must say what to do next, the way the synchronous endpoint does.
+		if s.Code == "password" {
+			if j.password != "" {
+				s.Error = "That password did not open the PDF."
+			} else {
+				s.Error = "This PDF is password-protected. Enter its password to continue."
+			}
+		}
 	}
 	return s
 }

@@ -609,3 +609,24 @@ func TestUnknownJobIsNotFound(t *testing.T) {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
 }
+
+func TestJobAsksForAPasswordAndSaysWhenItIsWrong(t *testing.T) {
+	stub := &stubConverter{err: fmt.Errorf("%w: it is encrypted", ingest.ErrEncrypted)}
+	srv := httptest.NewServer(web.New(stub, web.Options{}).Handler())
+	defer srv.Close()
+
+	started := postJob(t, srv, testpdf.Build(1), "")
+	state := waitForJob(t, srv, started.ID, "error")
+	if state.Code != "password" {
+		t.Errorf("code = %q, want password", state.Code)
+	}
+	if !strings.Contains(state.Error, "password-protected") {
+		t.Errorf("message = %q, want it to ask for the password", state.Error)
+	}
+
+	started = postJob(t, srv, testpdf.Build(1), "wrong")
+	state = waitForJob(t, srv, started.ID, "error")
+	if !strings.Contains(state.Error, "did not open") {
+		t.Errorf("message with a password = %q, want it to say the password was wrong", state.Error)
+	}
+}
