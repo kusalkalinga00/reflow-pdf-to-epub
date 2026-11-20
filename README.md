@@ -376,7 +376,10 @@ reflow serve
 
 A single page: drop a PDF, watch it convert, download the EPUB with its score and warnings.
 
-![The Reflow web app: a drop zone above a measured result card](docs/screenshots/web-app.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/web-app-dark.png">
+  <img src="docs/screenshots/web-app.png" alt="The Reflow web app: one drop zone and a measured result card">
+</picture>
 
 Two endpoints, for two kinds of client:
 
