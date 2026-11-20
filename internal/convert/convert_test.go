@@ -191,7 +191,10 @@ func encryptedPDF(t *testing.T, password string) []byte {
 	}
 	return out.Bytes()
 }
-func TestFootnoteAtThePageBottomBecomesAnAside(t *testing.T) {
+func TestUnreferencedNoteStaysBodyText(t *testing.T) {
+	// Small, marked type at the foot of a page is not enough: a note is only a
+	// note when the page's text cites it. Without that gate this book reported
+	// 195 footnotes, all of them diagram labels and code output.
 	pdf := testpdf.Build(3, testpdf.WithPages(
 		[]testpdf.Line{
 			{Text: "The passage above is worth a note, and the note sits at the foot of the page.", Size: 10, X: 72, Y: 700},
@@ -232,15 +235,15 @@ func TestFootnoteAtThePageBottomBecomesAnAside(t *testing.T) {
 			body = string(data)
 		}
 	}
-	if !strings.Contains(body, `epub:type="footnote" role="doc-footnote"`) {
-		t.Fatalf("the note is not marked as a footnote:\n%s", body)
+	if strings.Contains(body, `epub:type="footnote"`) {
+		t.Fatalf("an unreferenced note was marked as a footnote:\n%s", body)
 	}
 
-	if result.Quality.Signals.Footnotes != 1 {
-		t.Errorf("footnote signal = %d, want 1", result.Quality.Signals.Footnotes)
+	if result.Quality.Signals.Footnotes != 0 {
+		t.Errorf("footnote signal = %d, want 0", result.Quality.Signals.Footnotes)
 	}
-	if !hasIssue(result.Quality, "FOOTNOTES") {
-		t.Errorf("issues = %v, want FOOTNOTES", result.Quality.Issues)
+	if hasIssue(result.Quality, "FOOTNOTES") {
+		t.Errorf("issues = %v, want no FOOTNOTES", result.Quality.Issues)
 	}
 }
 

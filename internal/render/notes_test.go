@@ -8,11 +8,22 @@ import (
 )
 
 // footnoteDoc is one page of body text with a note beneath it.
-func footnoteDoc(note string, noteSize float64) idm.Document {
+//
+// reference is the marker the text cites: a note without one is not a note,
+// which is the rule the false-positive tests exercise.
+func footnoteDoc(note string, noteSize float64, reference string) idm.Document {
 	body := "The wand chooses the wizard, and the wizard learns to listen to it, " +
 		"which takes a great deal longer than buying one."
+	block := line(body, 1, 640, 650, 10)
+	if reference != "" {
+		block.Text = body + reference
+		block.Spans = []idm.Span{
+			{Text: body},
+			{Text: reference, Super: true},
+		}
+	}
 	return document([]idm.Block{
-		line(body, 1, 640, 650, 10),
+		block,
 		line(note, 1, 500, 508, noteSize),
 		line("The next page continues the story without a note.", 2, 700, 710, 10),
 		line("And the page after that ends the chapter.", 3, 700, 710, 10),
@@ -20,7 +31,7 @@ func footnoteDoc(note string, noteSize float64) idm.Document {
 }
 
 func TestFootnoteAtThePageBottomBecomesAnAside(t *testing.T) {
-	doc := footnoteDoc("1 Ollivander's shop, Diagon Alley, is described later on.", 8)
+	doc := footnoteDoc("1 Ollivander's shop, Diagon Alley, is described later on.", 8, "1")
 	doc.Outline = []idm.OutlineEntry{
 		{Title: "Chapter One", Page: 1, Level: 1, Y: 800},
 	}
@@ -43,7 +54,7 @@ func TestFootnoteAtThePageBottomBecomesAnAside(t *testing.T) {
 }
 
 func TestFootnoteReferenceLinksToItsNote(t *testing.T) {
-	doc := footnoteDoc("1 Ollivander's shop, Diagon Alley, is described later on.", 8)
+	doc := footnoteDoc("1 Ollivander's shop, Diagon Alley, is described later on.", 8, "1")
 	doc.Outline = []idm.OutlineEntry{
 		{Title: "Chapter One", Page: 1, Level: 1, Y: 800},
 	}
@@ -73,7 +84,7 @@ func TestFootnoteReferenceLinksToItsNote(t *testing.T) {
 func TestBottomParagraphWithoutAMarkerStaysBodyText(t *testing.T) {
 	// Small type at the bottom of a page is not enough: a note starts with the
 	// mark its reference carries.
-	doc := footnoteDoc("This paragraph simply continues onto the next page.", 8)
+	doc := footnoteDoc("This paragraph simply continues onto the next page.", 8, "1")
 
 	book, err := Render(doc, Options{})
 	if err != nil {
@@ -86,7 +97,7 @@ func TestBottomParagraphWithoutAMarkerStaysBodyText(t *testing.T) {
 }
 
 func TestPageNumberAtTheBottomIsNotAFootnote(t *testing.T) {
-	doc := footnoteDoc("42", 8)
+	doc := footnoteDoc("42", 8, "1")
 
 	book, err := Render(doc, Options{})
 	if err != nil {
@@ -99,7 +110,7 @@ func TestPageNumberAtTheBottomIsNotAFootnote(t *testing.T) {
 }
 
 func TestYearAtTheBottomIsNotAFootnote(t *testing.T) {
-	doc := footnoteDoc("1990 was the year the house was rebuilt by hand.", 8)
+	doc := footnoteDoc("1990 was the year the house was rebuilt by hand.", 8, "1990")
 
 	book, err := Render(doc, Options{})
 	if err != nil {
@@ -111,8 +122,51 @@ func TestYearAtTheBottomIsNotAFootnote(t *testing.T) {
 	}
 }
 
+func TestDiagramLabelAtTheBottomIsNotAFootnote(t *testing.T) {
+	// A book of figures numbers its labels at the foot of the page. They are
+	// small, numbered and in the bottom band, but they close no sentence.
+	doc := footnoteDoc("1) Data preparation & sampling", 8, "1")
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	if strings.Contains(book.Chapters[0].Body, "<aside") {
+		t.Errorf("a diagram label became a footnote:\n%s", book.Chapters[0].Body)
+	}
+}
+
+func TestNumberedTableCellIsNotAFootnote(t *testing.T) {
+	// A table cell can begin with a number and end with a full stop.
+	doc := footnoteDoc("1 . Grasses : They love to graze on various types of grasses.", 8, "1")
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(book.Chapters[0].Body, "<aside") {
+		t.Errorf("a numbered table cell became a footnote:\n%s", book.Chapters[0].Body)
+	}
+}
+
+func TestAnUnreferencedNoteStaysBodyText(t *testing.T) {
+	// A marked, small note at the foot of a page is only a note when the page
+	// points at it. Code sample output and standalone callouts look the same
+	// and would otherwise become hundreds of false footnotes.
+	doc := footnoteDoc("1 Ollivander's shop, Diagon Alley, is described later on.", 8, "")
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if strings.Contains(book.Chapters[0].Body, "<aside") {
+		t.Errorf("a note nobody references became a footnote:\n%s", book.Chapters[0].Body)
+	}
+}
+
 func TestMarkFootnotesCountsWhatItClassifies(t *testing.T) {
-	doc := footnoteDoc("1 Ollivander's shop, Diagon Alley, is described later on.", 8)
+	doc := footnoteDoc("1 Ollivander's shop, Diagon Alley, is described later on.", 8, "1")
 	paras := GroupParagraphs(doc.Body())
 
 	if got := MarkFootnotes(paras, doc.Pages); got != 1 {

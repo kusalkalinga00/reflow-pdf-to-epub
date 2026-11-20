@@ -93,6 +93,22 @@ func markFootnotes(paras []Paragraph, pages []idm.Page) int {
 			if _, ok := footnoteMarker(p); !ok {
 				continue
 			}
+			if !endsSentence(p.Text) {
+				// A note finishes a sentence. A diagram label, a caption and
+				// a single-line callout do not, and they are exactly the
+				// small type that sits at the bottom of a page.
+				continue
+			}
+
+			marker, _ := footnoteMarker(p)
+			if !referenced(paras, indexes, i, marker) {
+				// A note is referenced from the text it annotates. Without a
+				// reference the paragraph is more likely a diagram label, a
+				// code sample's output, or a numbered step — all of which are
+				// small type at the foot of a page, and none of which is a
+				// note.
+				continue
+			}
 
 			p.Kind = idm.KindFootnote
 			marked++
@@ -100,6 +116,37 @@ func markFootnotes(paras []Paragraph, pages []idm.Page) int {
 	}
 
 	return marked
+}
+
+// referenced reports whether a marker is cited in the text before its note.
+//
+// Two forms count: a raised marker, which is what a footnote reference looks
+// like, and a bracketed number, which is the other convention ("...as shown
+// [3]."). Both are evidence the page itself points at the note.
+func referenced(paras []Paragraph, pageIndexes []int, note int, marker string) bool {
+	if marker == "" {
+		return false
+	}
+
+	for _, i := range pageIndexes {
+		if i >= note {
+			break
+		}
+		p := paras[i]
+		if p.Page != paras[note].Page {
+			continue
+		}
+
+		for _, span := range p.Spans {
+			if span.Super && strings.TrimSpace(span.Text) == marker {
+				return true
+			}
+		}
+		if strings.Contains(p.Text, "["+marker+"]") {
+			return true
+		}
+	}
+	return false
 }
 
 // pageBodySize estimates the size the page's body text is set in.
@@ -158,10 +205,23 @@ func parseMarker(text string) (string, bool) {
 		return "", false
 	}
 
-	// The marker must be followed by a separator, not by more word: "1990"
-	// at the start of a paragraph is a year, not a reference.
+	// The marker must be followed by a space, not by more word or by
+	// punctuation: "1990" is a year, and "1) Data preparation" and
+	// "2.2) Tokenize" are diagram labels or numbered steps. Only a bare
+	// marker followed by prose is a note.
 	next := runes[n]
-	if next != ' ' && next != '\t' && next != '.' && next != ')' && next != ':' {
+	if next != ' ' && next != '\t' {
+		return "", false
+	}
+
+	// After the marker comes prose, not more notation: "1 . Grasses" is a
+	// numbered cell in a table, and its marker is followed by a full stop.
+	rest := strings.TrimSpace(text[n:])
+	if rest == "" {
+		return "", false
+	}
+	first := []rune(rest)[0]
+	if !unicode.IsLetter(first) && first != '"' && first != '\u201c' {
 		return "", false
 	}
 
@@ -170,6 +230,22 @@ func parseMarker(text string) (string, bool) {
 		return "", false
 	}
 	return marker, true
+}
+
+// endsSentence reports whether text closes like prose.
+func endsSentence(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	runes := []rune(trimmed)
+	for i := len(runes) - 1; i >= 0; i-- {
+		switch runes[i] {
+		case ' ', '\t':
+			continue
+		case '.', '!', '?', '\u2026', '"', '\'', '\u201d', '\u2019':
+			return true
+		}
+		return false
+	}
+	return false
 }
 
 func isNoteMark(r rune) bool {
