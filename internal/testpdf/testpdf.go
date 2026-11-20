@@ -80,7 +80,7 @@ func WithImage(jpeg []byte, pixelWidth, pixelHeight int, displayWidth, displayHe
 		c.imageDisplayW = displayWidth
 		c.imageDisplayH = displayHeight
 		c.imageFilter = "DCTDecode"
-		c.imageColorspace = "DeviceRGB"
+		c.imageColorspace = "/DeviceRGB"
 		c.imageBPC = 8
 	}
 }
@@ -100,7 +100,34 @@ func WithFlateImage(rgb []byte, pixelWidth, pixelHeight int, displayWidth, displ
 		c.imageDisplayW = displayWidth
 		c.imageDisplayH = displayHeight
 		c.imageFilter = "FlateDecode"
-		c.imageColorspace = "DeviceRGB"
+		c.imageColorspace = "/DeviceRGB"
+		c.imageBPC = 8
+	}
+}
+
+// WithIndexedImage draws a palette image on the first page: one byte per pixel
+// selecting an entry in palette, stored with /FlateDecode. It is the shape a
+// producer uses for line art, and the one whose samples cannot be read without
+// the palette.
+func WithIndexedImage(indices []byte, palette [][3]byte, pixelWidth, pixelHeight int, displayWidth, displayHeight float64) Option {
+	return func(c *config) {
+		var compressed bytes.Buffer
+		zw := zlib.NewWriter(&compressed)
+		zw.Write(indices)
+		zw.Close()
+
+		hex := make([]byte, 0, len(palette)*6)
+		for _, entry := range palette {
+			hex = append(hex, fmt.Sprintf("%02x%02x%02x", entry[0], entry[1], entry[2])...)
+		}
+
+		c.image = compressed.Bytes()
+		c.imageW = pixelWidth
+		c.imageH = pixelHeight
+		c.imageDisplayW = displayWidth
+		c.imageDisplayH = displayHeight
+		c.imageFilter = "FlateDecode"
+		c.imageColorspace = fmt.Sprintf("[/Indexed /DeviceRGB %d <%s>]", len(palette)-1, hex)
 		c.imageBPC = 8
 	}
 }
@@ -189,7 +216,7 @@ func Build(pages int, opts ...Option) []byte {
 
 	if len(cfg.image) > 0 {
 		objects[maxObj+1] = fmt.Sprintf(
-			"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace /%s /BitsPerComponent %d /Filter /%s /Length %d >>\nstream\n%s\nendstream",
+			"<< /Type /XObject /Subtype /Image /Width %d /Height %d /ColorSpace %s /BitsPerComponent %d /Filter /%s /Length %d >>\nstream\n%s\nendstream",
 			cfg.imageW, cfg.imageH, cfg.imageColorspace, cfg.imageBPC,
 			cfg.imageFilter, len(cfg.image), string(cfg.image),
 		)

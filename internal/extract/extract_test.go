@@ -242,6 +242,61 @@ func TestExtractDecodesFlateImages(t *testing.T) {
 	}
 }
 
+func TestExtractDecodesIndexedImages(t *testing.T) {
+	// A palette image: the samples are indices, so without the palette they
+	// are meaningless. PDFium rasterises the object for us, and the result
+	// must carry the palette's colours.
+	const size = 120
+	palette := [][3]byte{
+		{255, 0, 0},
+		{0, 255, 0},
+		{0, 0, 255},
+		{255, 255, 255},
+	}
+	indices := make([]byte, size*size)
+	for i := range indices {
+		indices[i] = byte(i % len(palette))
+	}
+
+	pdf := testpdf.Build(1, testpdf.WithIndexedImage(indices, palette, size, size, 200, 200))
+
+	doc, err := extractBytes(t, newExtractor(t, extract.Options{}), pdf)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+
+	var figure *idm.Block
+	for i := range doc.Blocks {
+		if doc.Blocks[i].Image != nil {
+			figure = &doc.Blocks[i]
+		}
+	}
+	if figure == nil {
+		t.Fatal("indexed image was skipped")
+	}
+
+	if figure.Image.MediaType != "image/png" {
+		t.Errorf("media type = %q, want image/png", figure.Image.MediaType)
+	}
+
+	img, err := png.Decode(bytes.NewReader(figure.Image.Data))
+	if err != nil {
+		t.Fatalf("recovered image is not a PNG: %v", err)
+	}
+	if b := img.Bounds(); b.Dx() != size || b.Dy() != size {
+		t.Fatalf("decoded size = %dx%d, want %dx%d", b.Dx(), b.Dy(), size, size)
+	}
+
+	// Pixel n carries palette entry n, laid out left to right.
+	for i, want := range palette {
+		r, g, b, _ := img.At(i, 0).RGBA()
+		got := [3]byte{byte(r >> 8), byte(g >> 8), byte(b >> 8)}
+		if got != want {
+			t.Errorf("pixel %d = %v, want %v", i, got, want)
+		}
+	}
+}
+
 func TestExtractRejectsCorruptInput(t *testing.T) {
 	_, err := extractBytes(t, newExtractor(t, extract.Options{}), []byte("this is not a pdf"))
 	if err == nil {
