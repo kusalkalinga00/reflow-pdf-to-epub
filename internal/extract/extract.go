@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"image/jpeg"
 	"image/png"
 	"io"
 	"math"
@@ -988,4 +989,89 @@ func coverage(lines []line, width, height float64) float64 {
 		return 1
 	}
 	return c
+}
+
+// RenderOptions configure page rasterisation for page-image books.
+type RenderOptions struct {
+	// DPI is the raster resolution. Zero means 150, which keeps a scanned
+	// page legible without making the book enormous.
+	DPI int
+	// Password opens an encrypted document. Empty means the extractor's own.
+	Password string
+	// Progress reports pages rendered.
+	Progress func(done, total int)
+}
+
+// RenderPages rasterises every page and returns one JPEG per page, in order.
+//
+// It is the page-image fallback for documents with no text layer: PDFium can
+// draw a page whether or not it has text, so a scan becomes a book instead of
+// an error. JPEG at quality 85 is the honest compromise for page images — lossless
+// PNG would multiply the archive several times for artefacts nobody sees at
+// reading size.
+func (e *PDFium) RenderPages(ctx context.Context, src io.ReaderAt, size int64, opts RenderOptions) ([][]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if size <= 0 {
+		return nil, fmt.Errorf("extract: empty document")
+	}
+
+	password := e.opts.Password
+	if opts.Password != "" {
+		password = opts.Password
+	}
+	open := &requests.OpenDocument{
+		FileReader:     io.NewSectionReader(src, 0, size),
+		FileReaderSize: size,
+	}
+	if password != "" {
+		open.Password = &password
+	}
+
+	doc, err := e.instance.OpenDocument(open)
+	if err != nil {
+		return nil, fmt.Errorf("open pdf: %w", err)
+	}
+	defer e.instance.FPDF_CloseDocument(&requests.FPDF_CloseDocument{Document: doc.Document})
+
+	count, err := e.instance.FPDF_GetPageCount(&requests.FPDF_GetPageCount{Document: doc.Document})
+	if err != nil {
+		return nil, fmt.Errorf("page count: %w", err)
+	}
+
+	dpi := opts.DPI
+	if dpi <= 0 {
+		dpi = 150
+	}
+	if opts.Progress != nil {
+		opts.Progress(0, count.PageCount)
+	}
+
+	pages := make([][]byte, 0, count.PageCount)
+	for i := 0; i < count.PageCount; i++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+
+		page := requests.Page{ByIndex: &requests.PageByIndex{Document: doc.Document, Index: i}}
+		rendered, err := e.instance.RenderPageInDPI(&requests.RenderPageInDPI{Page: page, DPI: dpi})
+		if err != nil {
+			return nil, fmt.Errorf("render page %d: %w", i+1, err)
+		}
+
+		var buf bytes.Buffer
+		encodeErr := jpeg.Encode(&buf, rendered.Result.RenderedImage, &jpeg.Options{Quality: 85})
+		rendered.Cleanup()
+		if encodeErr != nil {
+			return nil, fmt.Errorf("encode page %d: %w", i+1, encodeErr)
+		}
+		pages = append(pages, buf.Bytes())
+
+		if opts.Progress != nil {
+			opts.Progress(i+1, count.PageCount)
+		}
+	}
+
+	return pages, nil
 }
