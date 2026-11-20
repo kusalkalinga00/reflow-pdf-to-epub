@@ -964,3 +964,32 @@ func TestDeeperSectionsNestUnderTheirParent(t *testing.T) {
 		}
 	}
 }
+
+func TestCoverImageBecomesACoverDocument(t *testing.T) {
+	book := sampleBook()
+	book.Cover = &Cover{Data: []byte("jpeg-bytes"), MediaType: "image/jpeg"}
+
+	a := openArchive(t, mustWrite(t, book))
+
+	page, ok := a.files["OEBPS/text/cover.xhtml"]
+	if !ok {
+		t.Fatal("no cover document was written")
+	}
+	if !strings.Contains(string(page), `alt="Cover"`) {
+		t.Errorf("cover image has no alt text:\n%s", page)
+	}
+	// doc-cover is not an ARIA role; EPUBCheck rejects it.
+	if strings.Contains(string(page), "doc-cover") {
+		t.Errorf("cover document uses an invalid role:\n%s", page)
+	}
+
+	opf := string(a.mustGet(t, "OEBPS/package.opf"))
+	if !strings.Contains(opf, `properties="cover-image"`) {
+		t.Error("the package document does not mark the cover image")
+	}
+
+	nav := string(a.mustGet(t, "OEBPS/nav.xhtml"))
+	if !strings.Contains(nav, `epub:type="cover"`) {
+		t.Error("the landmarks do not point at the cover")
+	}
+}

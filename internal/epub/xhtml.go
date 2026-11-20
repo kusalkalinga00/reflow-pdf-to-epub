@@ -51,7 +51,6 @@ func (b *prepared) coverDocument() ([]byte, error) {
 
 	section := body.CreateElement("section")
 	section.CreateAttr("epub:type", "cover")
-	section.CreateAttr("role", "doc-cover")
 
 	div := section.CreateElement("div")
 	div.CreateAttr("class", "cover")
