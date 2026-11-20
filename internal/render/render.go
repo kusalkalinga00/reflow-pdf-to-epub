@@ -219,6 +219,11 @@ func chaptersFromOutline(paras []Paragraph, outline []idm.OutlineEntry) []chapte
 		chapters[index].paras = append(chapters[index].paras, p)
 	}
 
+	// A chapter's opening art is drawn above its title, and a bookmark points
+	// at the title: without this, a novel's banner and illustration land at the
+	// end of the previous chapter, which for the first chapter means the cover.
+	pullOpeningFigures(&frontMatter, chapters)
+
 	var out []chapter
 	if len(frontMatter) > 0 {
 		out = append(out, chapter{title: "Front matter", paras: frontMatter})
@@ -235,6 +240,59 @@ func chaptersFromOutline(paras []Paragraph, outline []idm.OutlineEntry) []chapte
 		return nil
 	}
 	return out
+}
+
+// pullOpeningFigures moves figures that sit above a chapter's first heading on
+// the chapter's start page into that chapter.
+//
+// The figures are already in the previous chapter's list because the bookmark
+// points at the heading and they are above it. They are only moved when the
+// previous chapter has no other content on that page: if it continues onto the
+// page, a figure above the heading belongs to its ending, not to the chapter
+// that starts below.
+func pullOpeningFigures(frontMatter *[]Paragraph, chapters []chapter) {
+	if len(chapters) == 0 {
+		return
+	}
+
+	move := func(prev *[]Paragraph, c *chapter) {
+		if len(*prev) == 0 || math.IsInf(c.startY, 1) {
+			return
+		}
+
+		var figures, text []Paragraph
+		for _, p := range *prev {
+			if p.Page != c.startPage {
+				continue
+			}
+			if p.Kind == idm.KindFigure {
+				figures = append(figures, p)
+			} else {
+				text = append(text, p)
+			}
+		}
+		if len(figures) == 0 || len(text) > 0 {
+			return
+		}
+
+		kept := make([]Paragraph, 0, len(*prev)-len(figures))
+		for _, p := range *prev {
+			if p.Page == c.startPage && p.Kind == idm.KindFigure {
+				continue
+			}
+			kept = append(kept, p)
+		}
+		*prev = kept
+
+		opening := make([]Paragraph, 0, len(figures)+len(c.paras))
+		opening = append(opening, figures...)
+		c.paras = append(opening, c.paras...)
+	}
+
+	move(frontMatter, &chapters[0])
+	for i := 1; i < len(chapters); i++ {
+		move(&chapters[i-1].paras, &chapters[i])
+	}
 }
 
 // assignSections attaches outline entries below the chapter level to the

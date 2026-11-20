@@ -349,3 +349,22 @@ func hasIssue(r score.Report, code string) bool {
 	}
 	return false
 }
+
+func TestAPageWithARecoveredFigureIsNotBlank(t *testing.T) {
+	// A cover or an illustration page has no text by design. Its figure is in
+	// the book, so counting the page as a loss would report something that is
+	// not missing.
+	doc := document(2, 0.3, block(idm.KindParagraph, 1))
+	doc.Pages[1].TextCoverage = 0
+
+	paras := append(paragraphs(), render.Paragraph{Kind: idm.KindFigure, Page: 2})
+
+	report := score.Evaluate(doc, paras, []string{"Chapter One"})
+
+	if report.Signals.BlankPages != 0 {
+		t.Errorf("blank pages = %d, want 0: the figure was recovered", report.Signals.BlankPages)
+	}
+	if report.Score != 100 {
+		t.Errorf("score = %d, want 100", report.Score)
+	}
+}

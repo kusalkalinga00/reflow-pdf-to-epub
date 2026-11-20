@@ -210,9 +210,20 @@ func gather(doc idm.Document, paras []render.Paragraph, chapters []string) Signa
 		}
 	}
 
+	// A page whose text could not be read is a loss only if it had nothing
+	// else to recover. A cover or an illustration page has no text by design,
+	// and its figure is embedded, so counting it would report a loss that does
+	// not exist.
+	figurePages := make(map[int]bool, len(paras))
+	for _, p := range paras {
+		if p.Kind == idm.KindFigure {
+			figurePages[p.Page] = true
+		}
+	}
+
 	var coverage float64
 	for _, page := range doc.Pages {
-		if page.TextCoverage <= 0 {
+		if page.TextCoverage <= 0 && !figurePages[page.Number] {
 			s.BlankPages++
 		}
 		coverage += page.TextCoverage
