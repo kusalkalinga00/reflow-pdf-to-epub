@@ -101,7 +101,7 @@ What a book carries:
 | Page list | One anchor per printed page, wherever the page begins |
 | Tables | Ruled regions, or a ruled region split at its content change; cells rebuilt from words |
 | Figures | Embedded once per unique image, referenced from every place it appears |
-| Cover | Page one's only content, when it is a single figure; declared as the cover in the package |
+| Cover | The first page-sized figure near the front — including a cover whose title was read off the artwork by OCR — declared as the cover image |
 | Running heads | Detected by masked repetition across pages, removed from the text |
 | Metadata | Title, authors, language, publisher, and a content-derived identifier |
 

@@ -837,3 +837,69 @@ func TestRenderKeepsATitlePageBeneathAnIllustration(t *testing.T) {
 		t.Error("the title page text was dropped")
 	}
 }
+
+func TestRenderFindsACoverAfterATitlePage(t *testing.T) {
+	// The cover is page two: page one is the title page. The title page stays.
+	doc := document([]idm.Block{
+		line("The Book Title", 1, 700, 710, 20),
+		{Kind: idm.KindFigure, Page: 2,
+			BBox:       idm.Rect{X0: 0, Y0: 0, X1: 595, Y1: 842},
+			Confidence: 1,
+			Image:      &idm.Image{Data: []byte("cover"), MediaType: "image/jpeg"}},
+		line("Chapter one text.", 3, 700, 710, 10),
+		line("Chapter two text.", 4, 700, 710, 10),
+	}, 4)
+	doc.Outline = []idm.OutlineEntry{
+		{Title: "Chapter One", Page: 3, Level: 1, Y: 720},
+		{Title: "Chapter Two", Page: 4, Level: 1, Y: 720},
+	}
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	if book.Cover == nil || string(book.Cover.Data) != "cover" {
+		t.Fatalf("cover = %+v, want page two's artwork", book.Cover)
+	}
+	if got := chapterTitlesOf(book); len(got) != 3 || got[0] != "Front matter" {
+		t.Fatalf("chapters = %v, want front matter then the two chapters", got)
+	}
+	front := book.Chapters[0].Body
+	if !strings.Contains(front, "The Book Title") {
+		t.Error("the title page was removed with the cover")
+	}
+	if strings.Contains(front, "<figure>") {
+		t.Error("the cover is still in the front matter")
+	}
+}
+
+func TestRenderFindsACoverBesideAPublisherMark(t *testing.T) {
+	doc := document([]idm.Block{
+		{Kind: idm.KindFigure, Page: 1,
+			BBox:       idm.Rect{X0: 0, Y0: 0, X1: 595, Y1: 842},
+			Confidence: 1,
+			Image:      &idm.Image{Data: []byte("cover"), MediaType: "image/jpeg"}},
+		{Kind: idm.KindFigure, Page: 1,
+			BBox:       idm.Rect{X0: 20, Y0: 20, X1: 60, Y1: 60},
+			Confidence: 1,
+			Image:      &idm.Image{Data: []byte("logo"), MediaType: "image/png"}},
+		line("Chapter one text.", 2, 700, 710, 10),
+		line("Chapter two text.", 3, 700, 710, 10),
+	}, 3)
+	doc.Outline = []idm.OutlineEntry{
+		{Title: "Chapter One", Page: 2, Level: 1, Y: 720},
+		{Title: "Chapter Two", Page: 3, Level: 1, Y: 720},
+	}
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if book.Cover == nil || string(book.Cover.Data) != "cover" {
+		t.Fatalf("cover = %+v, want the large image, not the publisher mark", book.Cover)
+	}
+	if got := chapterTitlesOf(book); len(got) != 2 || got[0] != "Chapter One" {
+		t.Errorf("chapters = %v, want the two chapters", got)
+	}
+}

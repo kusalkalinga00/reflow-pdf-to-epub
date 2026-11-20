@@ -93,75 +93,120 @@ func Render(doc idm.Document, opts Options) (epub.Book, error) {
 	return book, nil
 }
 
-// takeCover removes page one's cover from the chapters and returns its image.
+// Cover detection: a cover is a page-sized image near the front of the
+// document. The rules are geometric on purpose — a producer can put the cover
+// on page two, add a publisher logo beside it, or print the title on the
+// artwork with no text layer at all, and none of that is specific to one book.
+const (
+	// coverScanPages is how far into the book a cover may sit. A page-sized
+	// image deeper in the document is a figure, not a cover.
+	coverScanPages = 3
+	// coverMinArea is the fraction of the page the cover image must cover.
+	coverMinArea = 0.5
+	// coverDecorMax is the largest fraction of the page another image on the
+	// cover page may cover: a publisher mark, not a second illustration.
+	coverDecorMax = 0.1
+)
+
+// takeCover removes the cover from the chapters and returns its image.
 //
-// A cover is a page-sized figure. It may carry text — a cover's own title,
-// read back by OCR because the artwork has no text layer — but only when that
-// text sits on the figure. Text outside the figure means a title page beneath
-// an illustration, which is content the reader should keep.
-//
-// A one-page image document still needs a chapter, so there must be another
-// chapter with content.
+// A cover is a page-sized figure on one of the first pages. It may carry text —
+// a cover's own title, read back by OCR because the artwork has no text layer,
+// or a designed title — but only when that text sits on the figure. Text
+// outside the figure means a title page beneath an illustration, which is
+// content the reader should keep. A one-page image document still needs a
+// chapter, so there must be another chapter with content.
 func takeCover(chapters []chapter, pages []idm.Page) (*epub.Cover, bool) {
 	if len(chapters) < 2 || len(chapters[0].paras) == 0 || len(pages) == 0 {
 		return nil, false
 	}
 
-	first := chapters[0].paras[0].Page
-	if first < 1 || first > len(pages) {
-		return nil, false
+	for _, number := range leadingPages(chapters[0].paras, len(pages), coverScanPages) {
+		if cover, ok := coverOnPage(chapters, pages[number-1], number); ok {
+			chapters[0].paras = withoutPage(chapters[0].paras, number)
+			return cover, true
+		}
 	}
+	return nil, false
+}
 
-	var figure *Paragraph
-	onPage := 0
-	for i := range chapters[0].paras {
-		p := &chapters[0].paras[i]
-		if p.Page != first {
+// leadingPages returns the first n distinct page numbers in reading order.
+func leadingPages(paras []Paragraph, pageCount, n int) []int {
+	seen := make(map[int]bool, n)
+	var out []int
+	for _, p := range paras {
+		if p.Page < 1 || p.Page > pageCount || seen[p.Page] {
 			continue
 		}
-		onPage++
+		seen[p.Page] = true
+		out = append(out, p.Page)
+		if len(out) == n {
+			break
+		}
+	}
+	return out
+}
+
+// coverOnPage reports whether one page holds a cover, and returns it.
+func coverOnPage(chapters []chapter, page idm.Page, number int) (*epub.Cover, bool) {
+	figure := -1
+	var text []Paragraph
+	for i := range chapters[0].paras {
+		p := &chapters[0].paras[i]
+		if p.Page != number {
+			continue
+		}
 		if p.Kind == idm.KindFigure && p.Image != nil && len(p.Image.Data) > 0 {
-			if figure != nil {
-				// Two images on page one: not a simple cover.
-				return nil, false
+			if figure < 0 || p.Box.Area() > chapters[0].paras[figure].Box.Area() {
+				figure = i
 			}
-			figure = p
-		}
-	}
-	if figure == nil {
-		return nil, false
-	}
-
-	page := pages[first-1]
-	if figure.Box.Area() < page.Width*page.Height*0.5 {
-		return nil, false
-	}
-
-	// Any other paragraph on the page must sit on the figure itself.
-	for i := range chapters[0].paras {
-		p := &chapters[0].paras[i]
-		if p.Page != first || p.Kind == idm.KindFigure {
 			continue
 		}
-		if !insideBox(p.Box, figure.Box, 2) {
+		text = append(text, *p)
+	}
+	if figure < 0 {
+		return nil, false
+	}
+
+	cover := &chapters[0].paras[figure]
+	pageArea := page.Width * page.Height
+	if cover.Box.Area() < pageArea*coverMinArea {
+		return nil, false
+	}
+
+	// Anything else drawn on the page must be small decoration.
+	for i := range chapters[0].paras {
+		p := &chapters[0].paras[i]
+		if p.Page != number || i == figure || p.Kind != idm.KindFigure || p.Image == nil {
+			continue
+		}
+		if p.Box.Area() > pageArea*coverDecorMax {
 			return nil, false
 		}
 	}
 
-	cover := &epub.Cover{Data: figure.Image.Data, MediaType: figure.Image.MediaType}
+	// Text on the page must sit on the cover itself. OCR boxes drift a little,
+	// so allow a margin proportional to the figure.
+	margin := math.Max(2, 0.02*math.Max(cover.Box.Width(), cover.Box.Height()))
+	for _, t := range text {
+		if !insideBox(t.Box, cover.Box, margin) {
+			return nil, false
+		}
+	}
 
-	// The whole page goes with the cover, including its overlaid text and its
-	// page anchor: the print page list starts at the first page of content.
-	kept := make([]Paragraph, 0, len(chapters[0].paras)-onPage)
-	for _, p := range chapters[0].paras {
-		if p.Page == first {
+	return &epub.Cover{Data: cover.Image.Data, MediaType: cover.Image.MediaType}, true
+}
+
+// withoutPage removes every paragraph belonging to one page.
+func withoutPage(paras []Paragraph, page int) []Paragraph {
+	kept := make([]Paragraph, 0, len(paras))
+	for _, p := range paras {
+		if p.Page == page {
 			continue
 		}
 		kept = append(kept, p)
 	}
-	chapters[0].paras = kept
-
-	return cover, true
+	return kept
 }
 
 // insideBox reports whether inner lies within outer, allowing a small margin
