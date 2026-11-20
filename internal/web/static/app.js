@@ -13,6 +13,10 @@ const download = document.getElementById("download");
 const issues = document.getElementById("issues");
 const passwordRow = document.getElementById("password-row");
 const passwordInput = document.getElementById("password");
+const submitLabel = document.getElementById("submit-label");
+const reportToggle = document.getElementById("report");
+const openFile = document.getElementById("open-file");
+const coreVersion = document.getElementById("core-version");
 const progressWrap = document.getElementById("progress-wrap");
 const progress = document.getElementById("progress");
 const progressLabel = document.getElementById("progress-label");
@@ -73,7 +77,7 @@ function selectFile(file) {
   fileName.textContent = file.name + " · " + formatSize(file.size);
   fileName.hidden = false;
   submit.disabled = false;
-  submit.textContent = "Convert";
+  submitLabel.textContent = "Convert";
   passwordRow.hidden = true;
   passwordInput.value = "";
   resetOutput();
@@ -237,15 +241,19 @@ async function finishJob(state) {
   const report = state.quality || {};
   const tier = report.tier || "";
   const score = report.score || "";
+  const showReport = !reportToggle || reportToggle.checked;
 
   objectURL = URL.createObjectURL(blob);
   download.href = objectURL;
   download.download = currentFile.name.replace(/\.pdf$/i, "") + ".epub";
-  stats.textContent = state.pages + " pages · " + state.chapters + " chapters · " +
-    tierLabel(tier) + " " + score + "/100 · " + formatSize(blob.size);
+  stats.textContent = state.pages + " pages · " + state.chapters + " chapters" +
+    (showReport ? " · " + tierLabel(tier) + " " + score + "/100" : "") +
+    " · " + formatSize(blob.size);
 
   issues.replaceChildren();
-  const warnings = (report.issues || []).filter((i) => i.severity === "warn");
+  const warnings = showReport
+    ? (report.issues || []).filter((i) => i.severity === "warn")
+    : [];
   for (const issue of warnings.slice(0, 3)) {
     const item = document.createElement("li");
     item.textContent = issue.message;
@@ -271,7 +279,7 @@ function handleError(err) {
     // Ask instead of refusing: the reader already owns the password.
     const first = passwordRow.hidden;
     passwordRow.hidden = false;
-    submit.textContent = "Unlock";
+    submitLabel.textContent = "Unlock";
     setStatus(err.message || "This PDF is password-protected.", "error");
     if (first) passwordInput.focus();
     progressWrap.hidden = true;
@@ -300,6 +308,26 @@ function tierLabel(tier) {
   if (tier === "T3") return "Low confidence";
   return "Converted";
 }
+
+openFile.addEventListener("click", () => input.click());
+
+window.addEventListener("keydown", (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "o") {
+    event.preventDefault();
+    input.click();
+  }
+});
+
+fetch("/api/version")
+  .then((response) => (response.ok ? response.json() : null))
+  .then((data) => {
+    if (data && data.version && coreVersion) {
+      coreVersion.textContent = "Core " + data.version;
+    }
+  })
+  .catch(() => {
+    /* the badge is decoration; the page works without it */
+  });
 
 async function conversionError(response) {
   try {

@@ -630,3 +630,27 @@ func TestJobAsksForAPasswordAndSaysWhenItIsWrong(t *testing.T) {
 		t.Errorf("message with a password = %q, want it to say the password was wrong", state.Error)
 	}
 }
+
+func TestVersionEndpoint(t *testing.T) {
+	srv := newServer(t, web.Options{})
+
+	resp, err := http.Get(srv.URL + "/api/version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	var payload struct {
+		Version string `json:"version"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if payload.Version == "" {
+		t.Error("version is empty")
+	}
+}

@@ -10,27 +10,49 @@
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-  <main class="wrap">
-    <header class="brand">
-      <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H11v18H6.5A1.5 1.5 0 0 1 5 19.5z"/>
-        <path d="M11 3h6.5A1.5 1.5 0 0 1 19 4.5v15a1.5 1.5 0 0 1-1.5 1.5H11"/>
-      </svg>
-      <span>Reflow</span>
-    </header>
+  <header class="topbar">
+    <div class="topbar-left">
+      <span class="brand">
+        <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H11v18H6.5A1.5 1.5 0 0 1 5 19.5z"/>
+          <path d="M11 3h6.5A1.5 1.5 0 0 1 19 4.5v15a1.5 1.5 0 0 1-1.5 1.5H11"/>
+        </svg>
+        <span>Reflow</span>
+      </span>
+      <span class="topbar-divider" aria-hidden="true"></span>
+      <span class="core-pill" id="core-version">Core</span>
+    </div>
 
-    <h1>PDF to EPUB</h1>
-    <p class="lede">A reflowable EPUB 3 book with a measured quality report.</p>
+    <div class="topbar-right">
+      <button type="button" class="open" id="open-file">
+        Open File
+        <kbd aria-hidden="true">⌘O</kbd>
+      </button>
+      <a class="icon-link" href="https://github.com/kusalkalinga00/tool-factory-epub-convertor" target="_blank" rel="noreferrer noopener" aria-label="Source on GitHub">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 .5a11.5 11.5 0 0 0-3.63 22.42c.58.1.79-.25.79-.55v-2.1c-3.2.7-3.88-1.36-3.88-1.36-.53-1.33-1.29-1.69-1.29-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.74.4-1.25.73-1.54-2.55-.29-5.23-1.28-5.23-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.79 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.12 3.05.74.81 1.18 1.83 1.18 3.09 0 4.41-2.69 5.38-5.25 5.67.41.35.78 1.05.78 2.12v3.14c0 .3.21.66.8.55A11.5 11.5 0 0 0 12 .5z"/>
+        </svg>
+      </a>
+    </div>
+  </header>
 
-    <form id="convert-form" novalidate>
+  <main class="page">
+    <section class="hero">
+      <h1>PDF to EPUB</h1>
+      <p>A reflowable EPUB 3 book with a measured quality report.</p>
+    </section>
+
+    <form class="card" id="convert-form" novalidate>
       <div class="drop" id="drop">
         <input type="file" id="file" name="file" accept="application/pdf,.pdf">
         <label for="file" class="drop-label">
-          <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M12 15V4"/>
-            <path d="M7.5 8.5 12 4l4.5 4.5"/>
-            <path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/>
-          </svg>
+          <span class="drop-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 15V4"/>
+              <path d="M7.5 8.5 12 4l4.5 4.5"/>
+              <path d="M5 15v3a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-3"/>
+            </svg>
+          </span>
           <span class="drop-title">Drop a PDF, or <span class="link">browse</span></span>
           <span class="drop-note">Up to 100 MB · 1,000 pages</span>
         </label>
@@ -43,18 +65,40 @@
         <p class="hint">Reflow opens a PDF you can already read; it never removes DRM.</p>
       </div>
 
+      <div class="settings">
+        <div class="row">
+          <span id="layout-label">Layout Target</span>
+          <div class="segmented" role="group" aria-labelledby="layout-label">
+            <span class="seg seg-active" aria-current="true">EPUB 3 Reflow</span>
+            <span class="seg seg-disabled" title="Fixed layout is not supported yet">Fixed Layout</span>
+          </div>
+        </div>
+        <div class="row">
+          <label for="report">Quality Analysis Report</label>
+          <span class="switch">
+            <input type="checkbox" id="report" checked>
+            <span class="track" aria-hidden="true"></span>
+          </span>
+        </div>
+      </div>
+
       <div class="actions">
-        <button type="submit" id="submit" disabled>Convert</button>
+        <button type="submit" id="submit" disabled>
+          <span id="submit-label">Convert</span>
+          <kbd aria-hidden="true">↵ Enter</kbd>
+        </button>
         <button type="button" id="cancel" class="ghost" hidden>Cancel</button>
       </div>
+
+      <div class="progress" id="progress-wrap" hidden>
+        <div class="progress-head">
+          <span id="progress-label"></span>
+        </div>
+        <progress id="progress" max="100"></progress>
+      </div>
+
+      <p class="status" id="status" role="status" aria-live="polite"></p>
     </form>
-
-    <div class="progress" id="progress-wrap" hidden>
-      <p id="progress-label"></p>
-      <progress id="progress" max="100"></progress>
-    </div>
-
-    <p class="status" id="status" role="status" aria-live="polite"></p>
 
     <section class="result" id="result" hidden aria-labelledby="result-title">
       <div class="result-head">
@@ -71,9 +115,18 @@
       <ul class="issues" id="issues" aria-label="Conversion notes"></ul>
       <a class="download" id="download" download>Download EPUB</a>
     </section>
-
-    <p class="foot">Converted in memory, never stored. No accounts, no history.</p>
   </main>
+
+  <footer class="bottom">
+    <p class="foot-left">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 3l7 3v5c0 4.6-3 8.1-7 9.5-4-1.4-7-4.9-7-9.5V6z"/>
+        <path d="m9 12 2 2 4-4"/>
+      </svg>
+      Converted in-memory, never stored. No accounts, no history.
+    </p>
+    <p class="foot-right">Zero server retention · Runs locally</p>
+  </footer>
 
   <script src="/app.js" defer></script>
 </body>
