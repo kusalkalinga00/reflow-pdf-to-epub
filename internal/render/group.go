@@ -25,6 +25,9 @@ type Paragraph struct {
 	Image *idm.Image
 	// Table is set for recovered tables.
 	Table *idm.TableGrid
+	// Spans carry inline styling, when the source had any. They concatenate
+	// to Text exactly, or they are nil.
+	Spans []idm.Span
 }
 
 // GroupParagraphs merges line blocks into paragraphs and classifies headings.
@@ -69,6 +72,7 @@ func GroupParagraphs(blocks []idm.Block) []Paragraph {
 			Page:     b.Page,
 			Box:      b.BBox,
 			FontSize: b.FontSize,
+			Spans:    b.Spans,
 		})
 	}
 
@@ -104,7 +108,9 @@ func shouldMerge(prev Paragraph, next idm.Block) bool {
 }
 
 func merge(prev Paragraph, next idm.Block) Paragraph {
+	before := prev.Text
 	prev.Text = normalize.JoinLines(prev.Text, next.Text)
+	prev.Spans = mergeSpans(before, prev.Text, prev.Spans, next.Spans)
 	prev.Box = idm.Rect{
 		X0: math.Min(prev.Box.X0, next.BBox.X0),
 		Y0: math.Min(prev.Box.Y0, next.BBox.Y0),
@@ -115,6 +121,41 @@ func merge(prev Paragraph, next idm.Block) Paragraph {
 		prev.FontSize = next.FontSize
 	}
 	return prev
+}
+
+// mergeSpans joins the inline styling of two merged lines.
+//
+// The join inserts a space between the lines; the runs keep concatenating to
+// the text because that space is added to the last span of the first line. Any
+// mismatch drops the styling rather than keeping runs that do not reconstruct
+// the paragraph.
+func mergeSpans(before, after string, prev, next []idm.Span) []idm.Span {
+	if len(prev) == 0 || len(next) == 0 {
+		return nil
+	}
+
+	out := make([]idm.Span, 0, len(prev)+len(next))
+	out = append(out, prev...)
+	out[len(out)-1].Text += " "
+	out = append(out, next...)
+
+	var joined strings.Builder
+	for _, s := range out {
+		joined.WriteString(s.Text)
+	}
+	if joined.String() != after {
+		return nil
+	}
+	return out
+}
+
+// spanText is the text a span list describes.
+func spanText(spans []idm.Span) string {
+	var b strings.Builder
+	for _, s := range spans {
+		b.WriteString(s.Text)
+	}
+	return b.String()
 }
 
 func classifyHeadings(paras []Paragraph) {

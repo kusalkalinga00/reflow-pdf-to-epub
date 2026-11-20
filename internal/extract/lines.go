@@ -3,6 +3,7 @@ package extract
 import (
 	"math"
 	"strings"
+	"unicode"
 
 	"github.com/klippa-app/go-pdfium/responses"
 
@@ -18,6 +19,9 @@ type line struct {
 	// words are the line's word boxes, in order. They are what table detection
 	// and footnote finding need; the line text is a convenience for readers.
 	words []word
+	// spans carry inline styling, when the line has any. They concatenate to
+	// the line text exactly.
+	spans []idm.Span
 }
 
 type word struct {
@@ -201,12 +205,16 @@ func joinPieces(pieces []piece) line {
 		return line{}
 	}
 
+	size := capHeight(pieces, box)
+	baseline, _ := baselineOf(pieces)
+
 	return line{
 		text:       text,
 		box:        box,
-		fontSize:   capHeight(pieces, box),
+		fontSize:   size,
 		confidence: 1,
 		words:      wordBoxes(pieces),
+		spans:      superscriptSpans(pieces, size, baseline),
 	}
 }
 
@@ -278,6 +286,178 @@ func wordBoxes(pieces []piece) []word {
 	flush()
 
 	return out
+}
+
+// superscriptSpans finds raised, smaller glyph runs in a line.
+//
+// A footnote marker, an ordinal suffix and an exponent all have the same shape
+// in a PDF: a short run of glyphs set smaller than the line and lifted above
+// its baseline. That is the only inline styling extraction can infer reliably,
+// because it has geometry and nothing else.
+//
+// The rule is narrow because a false positive is visible: quote marks, hyphens
+// and the asterisk in a code sample are small glyphs whose ink sits above the
+// baseline, and lifting them would corrupt text throughout the book. So a run
+// must be small, raised, short, attached to the word before it, and made of
+// digits, note marks, or an ordinal suffix. Everything else stays plain text.
+func superscriptSpans(pieces []piece, size, baseline float64) []idm.Span {
+	if size <= 0 {
+		return nil
+	}
+
+	var (
+		spans []idm.Span
+		begin int
+		super bool
+	)
+
+	flush := func(end int) {
+		if end <= begin {
+			return
+		}
+
+		run := pieces[begin:end]
+		text := pieceText(run)
+		var before piece
+		if begin > 0 {
+			before = pieces[begin-1]
+		}
+		marked := super && looksLikeSuperscript(text, run, before, size)
+		if marked && begin > 0 {
+			marked = attachedTo(pieces[begin-1], run[0], size)
+		}
+		if marked && end < len(pieces) && isLetterPiece(pieces[end]) {
+			// A marker ends a word or is followed by punctuation. A letter
+			// right after the run means it was part of the word's own type,
+			// lifted by a font quirk rather than set as annotation.
+			marked = false
+		}
+
+		span := idm.Span{Text: text}
+		if marked {
+			span.Super = true
+		}
+		spans = append(spans, span)
+	}
+
+	for i, p := range pieces {
+		if strings.TrimSpace(p.text) == "" {
+			// A space ends a raised run: the marker is the glyphs only, and
+			// the space belongs to the text that follows it.
+			if super && begin < i {
+				flush(i)
+				begin = i
+				super = false
+			}
+			continue
+		}
+
+		raised := p.box.Height() > 0 &&
+			p.box.Height() <= 0.8*size &&
+			p.box.Y0 >= baseline+0.25*size
+
+		if begin < i && raised != super {
+			flush(i)
+			begin = i
+		}
+		if begin == i {
+			super = raised
+		}
+	}
+	flush(len(pieces))
+
+	for _, span := range spans {
+		if span.Super {
+			return spans
+		}
+	}
+	return nil
+}
+
+// endsInDigit reports whether a piece ends in a digit.
+func endsInDigit(p piece) bool {
+	runes := []rune(strings.TrimSpace(p.text))
+	if len(runes) == 0 {
+		return false
+	}
+	return unicode.IsDigit(runes[len(runes)-1])
+}
+
+// isLetterPiece reports whether a piece begins with a letter.
+func isLetterPiece(p piece) bool {
+	for _, r := range p.text {
+		return unicode.IsLetter(r)
+	}
+	return false
+}
+
+// attachedTo reports whether a raised run directly continues the glyph before
+// it. A marker is printed against its word; a stray asterisk in code is not.
+func attachedTo(prev, first piece, size float64) bool {
+	if strings.TrimSpace(prev.text) == "" {
+		return false
+	}
+	return prev.box.HorizontalGap(first.box) <= 0.2*size
+}
+
+// looksLikeSuperscript accepts the runs that can only be markers or suffixes,
+// and rejects the punctuation and small-caps glyphs that share their geometry.
+func looksLikeSuperscript(text string, pieces []piece, before piece, size float64) bool {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return false
+	}
+
+	runes := []rune(trimmed)
+	if len(runes) > 3 {
+		return false
+	}
+
+	digits, marks, letters := 0, 0, 0
+	for _, r := range runes {
+		switch {
+		case unicode.IsDigit(r):
+			digits++
+		case unicode.IsLetter(r):
+			letters++
+		case r == '*' || r == '\u2020' || r == '\u2021' || r == '\u00a7' || r == '\u00b6':
+			marks++
+		default:
+			return false
+		}
+	}
+	switch {
+	case digits == len(runes):
+		// A number: a reference marker.
+	case marks == len(runes) && len(runes) <= 2:
+		// An asterisk, dagger or section sign.
+	case letters > 0 && digits == 0 && letters <= 2 && endsInDigit(before):
+		// An ordinal suffix such as "1st" or "2nd": the digits are set in the
+		// body face, the suffix is lifted.
+	case letters > 0 && digits > 0 && letters <= 2:
+		// A marker printed as one run, such as "1st".
+	default:
+		return false
+	}
+
+	// Small caps are also smaller than the line, but they sit on the
+	// baseline; only a run lifted off it counts.
+	height := 0.0
+	for _, p := range pieces {
+		if h := p.box.Height(); h > height {
+			height = h
+		}
+	}
+	return height > 0 && height <= 0.75*size
+}
+
+// pieceText concatenates a piece run.
+func pieceText(pieces []piece) string {
+	var b strings.Builder
+	for _, p := range pieces {
+		b.WriteString(p.text)
+	}
+	return b.String()
 }
 
 // capHeight estimates the text size from the line's ascender-to-baseline

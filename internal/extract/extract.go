@@ -916,6 +916,15 @@ func (e *PDFium) metadata(doc references.FPDF_DOCUMENT) idm.Metadata {
 	return meta
 }
 
+// joinedSpans is the text a span list describes.
+func joinedSpans(spans []idm.Span) string {
+	var b strings.Builder
+	for _, s := range spans {
+		b.WriteString(s.Text)
+	}
+	return b.String()
+}
+
 func wordTexts(words []word) []string {
 	out := make([]string, len(words))
 	for i, w := range words {
@@ -939,6 +948,13 @@ func blocksFromLines(lines []line, page int) []idm.Block {
 			text = strings.Join(wordTexts(l.words), " ")
 		}
 
+		spans := l.spans
+		if joinedSpans(spans) != text {
+			// Styling that cannot reconstruct the text exactly is dropped:
+			// the text is authoritative and a mismatch fails validation.
+			spans = nil
+		}
+
 		blocks = append(blocks, idm.Block{
 			Kind:       idm.KindParagraph,
 			Text:       text,
@@ -947,6 +963,7 @@ func blocksFromLines(lines []line, page int) []idm.Block {
 			Confidence: l.confidence,
 			FontSize:   l.fontSize,
 			Words:      words,
+			Spans:      spans,
 		})
 	}
 	return blocks

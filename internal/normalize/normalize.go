@@ -29,18 +29,17 @@ func Apply(doc idm.Document) idm.Document {
 			continue
 		}
 
-		// Spans must still concatenate to Text. Runs are normalized with their
-		// boundary spaces preserved, and if the result no longer matches the
-		// block text, the text wins and styling is dropped rather than
-		// producing a block that fails validation.
+		// Spans must still concatenate to Text, and they carry their own
+		// boundary spaces: "an " + "efficient" is one split, not a space the
+		// spans may omit. Runs are normalized with those spaces preserved, and
+		// if the result no longer matches the block text, the text wins and
+		// styling is dropped rather than producing a block that fails
+		// validation.
 		spans := make([]idm.Span, len(b.Spans))
 		var joined strings.Builder
 		for j, s := range b.Spans {
 			spans[j] = s
 			spans[j].Text = spanText(s.Text)
-			if j > 0 {
-				joined.WriteByte(' ')
-			}
 			joined.WriteString(spans[j].Text)
 		}
 		if joined.String() != blocks[i].Text {

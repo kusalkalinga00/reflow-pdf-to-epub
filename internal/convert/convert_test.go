@@ -1,9 +1,12 @@
 package convert_test
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"errors"
+	"io"
+	"strings"
 	"sync"
 	"testing"
 
@@ -12,6 +15,7 @@ import (
 
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ingest"
+	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/score"
 	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/testpdf"
 )
 
@@ -184,4 +188,66 @@ func encryptedPDF(t *testing.T, password string) []byte {
 		t.Fatalf("encrypt fixture: %v", err)
 	}
 	return out.Bytes()
+}
+func TestFootnoteAtThePageBottomBecomesAnAside(t *testing.T) {
+	pdf := testpdf.Build(3, testpdf.WithPages(
+		[]testpdf.Line{
+			{Text: "The passage above is worth a note, and the note sits at the foot of the page.", Size: 10, X: 72, Y: 700},
+			{Text: "1 The note itself, set smaller than the body text it annotates.", Size: 8, X: 72, Y: 60},
+		},
+		[]testpdf.Line{{Text: "The next page carries the argument forward.", Size: 10, X: 72, Y: 700}},
+		[]testpdf.Line{{Text: "The last page closes the chapter.", Size: 10, X: 72, Y: 700}},
+	))
+
+	converter, err := convert.New(convert.Options{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer converter.Close()
+
+	result, err := converter.Run(context.Background(), bytes.NewReader(pdf), int64(len(pdf)), convert.DocOptions{Name: "notes.pdf"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	zr, err := zip.NewReader(bytes.NewReader(result.EPUB), int64(len(result.EPUB)))
+	if err != nil {
+		t.Fatalf("epub is not a zip: %v", err)
+	}
+
+	var body string
+	for _, f := range zr.File {
+		if f.Name == "OEBPS/text/chapter-001.xhtml" {
+			rc, err := f.Open()
+			if err != nil {
+				t.Fatalf("open chapter: %v", err)
+			}
+			data, err := io.ReadAll(rc)
+			rc.Close()
+			if err != nil {
+				t.Fatalf("read chapter: %v", err)
+			}
+			body = string(data)
+		}
+	}
+	if !strings.Contains(body, `epub:type="footnote" role="doc-footnote"`) {
+		t.Fatalf("the note is not marked as a footnote:\n%s", body)
+	}
+
+	if result.Quality.Signals.Footnotes != 1 {
+		t.Errorf("footnote signal = %d, want 1", result.Quality.Signals.Footnotes)
+	}
+	if !hasIssue(result.Quality, "FOOTNOTES") {
+		t.Errorf("issues = %v, want FOOTNOTES", result.Quality.Issues)
+	}
+}
+
+// hasIssue reports whether the report carries an issue with this code.
+func hasIssue(report score.Report, code string) bool {
+	for _, issue := range report.Issues {
+		if issue.Code == code {
+			return true
+		}
+	}
+	return false
 }

@@ -57,6 +57,7 @@ type Signals struct {
 	OCRedPages      int     `json:"ocrPages"`
 	OutlineEntries  int     `json:"outlineEntries"`
 	RecoveredTables int     `json:"recoveredTables"`
+	Footnotes       int     `json:"footnotes"`
 	Tables          int     `json:"tables"`
 	Figures         int     `json:"figures"`
 	FiguresEmbedded int     `json:"figuresEmbedded"`
@@ -141,6 +142,14 @@ func Evaluate(doc idm.Document, paras []render.Paragraph, chapters []string) Rep
 			s.ImagesSkipped, plural(s.ImagesSkipped))
 	}
 
+	if s.Footnotes > 0 {
+		r.Issues = append(r.Issues, Issue{
+			Severity: SeverityInfo,
+			Code:     "FOOTNOTES",
+			Message:  fmt.Sprintf("Recovered %d footnote%s.", s.Footnotes, plural(s.Footnotes)),
+		})
+	}
+
 	if s.RecoveredTables > 0 {
 		r.Issues = append(r.Issues, Issue{
 			Severity: SeverityInfo,
@@ -188,8 +197,11 @@ func gather(doc idm.Document, paras []render.Paragraph, chapters []string) Signa
 	}
 
 	for _, p := range paras {
-		if p.Kind == idm.KindHeading {
+		switch p.Kind {
+		case idm.KindHeading:
 			s.Headings++
+		case idm.KindFootnote:
+			s.Footnotes++
 		}
 	}
 
