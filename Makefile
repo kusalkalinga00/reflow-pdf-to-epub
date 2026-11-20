@@ -62,9 +62,19 @@ tidy: deps
 ## check: everything CI runs
 check: deps fmt-check tidy vet test
 
-## run: run the CLI from source
+## run: run the CLI from source (make run -- serve, make run -- convert book.pdf)
+#
+# Words after `run` are goals to make, not arguments, so they are filtered
+# out of the target and handed to the CLI; the catch-all below stops make
+# from failing on them.
+RUN_ARGS ?= $(filter-out $@,$(MAKECMDGOALS))
+
 run: deps
-	go run ./cmd/reflow
+	go run ./cmd/reflow $(RUN_ARGS) $(ARGS)
+
+# Unknown goals are CLI arguments to `run`, not typos worth failing on.
+%:
+	@:
 
 ## clean: remove build output, keeping the PDFium download
 clean:
