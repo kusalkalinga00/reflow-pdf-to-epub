@@ -44,7 +44,20 @@ func Render(doc idm.Document, opts Options) (epub.Book, error) {
 	title := titleOf(doc, opts)
 	chapters := buildChapters(paras, title, doc.Outline)
 
+	// A cover is page one's only content: a single figure and no text. Handing
+	// it to the writer as a cover keeps it out of the reading flow and lets a
+	// reader show it as the book's cover, rather than as a one-image chapter
+	// that some readers render as a blank page followed by the first chapter.
+	cover, ok := takeCover(chapters)
+	if !ok {
+		cover = nil
+	} else if len(chapters) > 0 && len(chapters[0].paras) == 0 {
+		// The front-matter chapter held only the cover.
+		chapters = chapters[1:]
+	}
+
 	book := epub.Book{
+		Cover: cover,
 		Metadata: epub.Metadata{
 			Title:     title,
 			Authors:   doc.Meta.Authors,
@@ -78,6 +91,40 @@ func Render(doc idm.Document, opts Options) (epub.Book, error) {
 
 	book.Images = assets.images
 	return book, nil
+}
+
+// takeCover removes page one's lone figure from the chapters and returns it as
+// the book's cover.
+//
+// The rule is narrow on purpose: the figure must be the only thing on the page,
+// and there must be another chapter with content. A title page that carries
+// text is not a cover, and a one-page image document still needs a chapter.
+func takeCover(chapters []chapter) (*epub.Cover, bool) {
+	if len(chapters) < 2 || len(chapters[0].paras) == 0 {
+		return nil, false
+	}
+
+	first := chapters[0].paras[0].Page
+	var onPage []int
+	for i, p := range chapters[0].paras {
+		if p.Page == first {
+			onPage = append(onPage, i)
+		}
+	}
+	if len(onPage) != 1 {
+		return nil, false
+	}
+
+	p := chapters[0].paras[onPage[0]]
+	if p.Kind != idm.KindFigure || p.Image == nil || len(p.Image.Data) == 0 {
+		return nil, false
+	}
+
+	// The cover's page anchor goes with it: the print page list starts at the
+	// first page of content, so nothing points at a missing anchor.
+	chapters[0].paras = append(chapters[0].paras[:onPage[0]], chapters[0].paras[onPage[0]+1:]...)
+
+	return &epub.Cover{Data: p.Image.Data, MediaType: p.Image.MediaType}, true
 }
 
 // assets names and deduplicates figures. The same logo or background often

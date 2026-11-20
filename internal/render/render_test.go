@@ -704,3 +704,71 @@ func TestRenderKeepsAFigureWithTheChapterItEnds(t *testing.T) {
 		t.Error("chapter two took a figure that belongs to the previous chapter")
 	}
 }
+
+func TestRenderTreatsALoneFirstPageFigureAsTheCover(t *testing.T) {
+	// A cover is page one's only content: one figure, no text. It becomes the
+	// book's cover rather than a one-image chapter that some readers render as
+	// a blank page before the first chapter.
+	doc := document([]idm.Block{
+		{Kind: idm.KindFigure, Page: 1,
+			BBox:       idm.Rect{X0: 100, Y0: 200, X1: 500, Y1: 700},
+			Confidence: 1,
+			Image:      &idm.Image{Data: []byte("cover"), MediaType: "image/jpeg"}},
+		line("Chapter one text.", 2, 700, 710, 10),
+		line("Chapter two text.", 3, 700, 710, 10),
+	}, 3)
+	doc.Outline = []idm.OutlineEntry{
+		{Title: "Chapter One", Page: 2, Level: 1, Y: 720},
+		{Title: "Chapter Two", Page: 3, Level: 1, Y: 720},
+	}
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	if book.Cover == nil {
+		t.Fatal("page one's lone figure was not taken as the cover")
+	}
+	if string(book.Cover.Data) != "cover" {
+		t.Errorf("cover data = %q", book.Cover.Data)
+	}
+	if titles := chapterTitlesOf(book); len(titles) != 2 || titles[0] != "Chapter One" {
+		t.Errorf("chapters = %v, want the two outline chapters", titles)
+	}
+	if len(book.Images) != 0 {
+		t.Errorf("the cover was also embedded as a figure (%d images)", len(book.Images))
+	}
+	for _, page := range book.PageList {
+		if page.Label == "1" {
+			t.Error("the cover's page is still in the print page list")
+		}
+	}
+}
+
+func TestRenderKeepsATitlePageThatCarriesText(t *testing.T) {
+	doc := document([]idm.Block{
+		{Kind: idm.KindFigure, Page: 1,
+			BBox:       idm.Rect{X0: 100, Y0: 300, X1: 500, Y1: 700},
+			Confidence: 1,
+			Image:      &idm.Image{Data: []byte("art"), MediaType: "image/jpeg"}},
+		line("The Book Title", 1, 100, 140, 24),
+		line("Chapter one text.", 2, 700, 710, 10),
+		line("Chapter two text.", 3, 700, 710, 10),
+	}, 3)
+	doc.Outline = []idm.OutlineEntry{
+		{Title: "Chapter One", Page: 2, Level: 1, Y: 720},
+		{Title: "Chapter Two", Page: 3, Level: 1, Y: 720},
+	}
+
+	book, err := Render(doc, Options{})
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if book.Cover != nil {
+		t.Error("a title page with text was taken as a cover")
+	}
+	if len(book.Images) != 1 {
+		t.Errorf("images = %d, want the title-page art kept as a figure", len(book.Images))
+	}
+}
