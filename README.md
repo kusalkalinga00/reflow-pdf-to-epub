@@ -51,7 +51,9 @@ What comes out:
 - **Running headers and footers removed** (268 of them from one book), page numbers masked so the
   repeated edge is recognised rather than guessed.
 - **Footnotes kept as footnotes**: a marked, small-type paragraph at the foot of a page becomes an
-  EPUB `footnote` aside, linked to its reference when a raised marker in the text matches it.
+  EPUB `footnote` aside when the page's text cites it, linked to that reference.
+- **Links stay links**: a URL annotation becomes a real `<a href>`, and a link to another page of
+  the PDF becomes a link to that page's anchor in whichever chapter holds it.
 - **Superscripts stay superscripts** — footnote markers and ordinal suffixes keep their raised
   type instead of arriving as inline digits.
 - **A print page list**, so "go to page 42" still works in a reflowed book.
@@ -106,7 +108,8 @@ What a book carries:
 | Tables | Ruled regions, or a ruled region split at its content change; cells rebuilt from words |
 | Figures | Embedded once per unique image, referenced from every place it appears |
 | Cover | The first page-sized figure near the front — including a cover whose title was read off the artwork by OCR — declared as the cover image |
-| Footnotes | A marked, small-type paragraph at the foot of a page becomes an `aside epub:type="footnote"`; its reference is a link when a raised marker on the same page matches |
+| Footnotes | A marked, small-type paragraph at the foot of a page becomes an `aside epub:type="footnote"` when the page's text cites its marker; the reference becomes a noteref link |
+| Links | URL annotations become `<a href>`; a link to another page becomes a link to that page's anchor, in the chapter that holds it |
 | Running heads | Detected by masked repetition across pages, removed from the text |
 | Metadata | Title, authors, language, publisher, and a content-derived identifier |
 
@@ -510,11 +513,15 @@ job API shows page progress; the CLI prints when it is done. This is not a netwo
 ## Known limits
 
 - **No math OCR.** Equations with no text layer are not recovered. Math is an explicit non-goal.
-- **Footnote detection is geometric.** A note is a short, small-type paragraph in the bottom third
-  of a page that starts with a marker (a number, `*`, `†`, `‡`, `§`). A note that runs above the
-  bottom third, or has no marker, stays as body text. A reference is linked only when a raised
-  marker on the same page matches exactly; an ambiguous match is left as plain superscript text
-  rather than jumping to the wrong note.
+- **Footnote detection is geometric and needs a reference.** A note is a short, small-type
+  paragraph in the bottom third of a page that starts with a bare marker (a number, `*`, `†`, `‡`,
+  `§`) and closes a sentence, and the page's text must cite that marker (a raised marker or `[3]`).
+  Without the citation it is a diagram label, a numbered step or code output — all of them small
+  type at the foot of a page — and it stays as body text. Notes above the bottom third, notes
+  numbered as `1)`, and notes whose reference the extractor cannot see are kept as text.
+- **Links a book cannot offer are skipped by name.** Only `http`, `https` and `mailto` targets are
+  carried; `javascript:`, `data:`, `file:` and links to other documents are counted in the report.
+  A link to a page that carries no anchor (a blank page) stays as plain text.
 - **Vector figures and alpha** are not preserved: a PDF's vector art becomes an embedded raster or
   is skipped, and PNG alpha is flattened.
 - **Scans without a text layer become T3 page-image books.** Every page is rendered to an image,

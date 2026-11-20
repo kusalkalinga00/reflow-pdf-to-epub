@@ -62,6 +62,10 @@ type Signals struct {
 	Figures         int     `json:"figures"`
 	FiguresEmbedded int     `json:"figuresEmbedded"`
 	ImagesSkipped   int     `json:"imagesSkipped"`
+	Links           int     `json:"links"`
+	LinkAnnotations int     `json:"linkAnnotations"`
+	ExternalLinks   int     `json:"externalLinks"`
+	LinksSkipped    int     `json:"linksSkipped"`
 	MeanCoverage    float64 `json:"meanCoverage"`
 }
 
@@ -158,6 +162,24 @@ func Evaluate(doc idm.Document, paras []render.Paragraph, chapters []string) Rep
 		})
 	}
 
+	if s.Links > 0 {
+		r.Issues = append(r.Issues, Issue{
+			Severity: SeverityInfo,
+			Code:     "LINKS",
+			Message: fmt.Sprintf("Carried %d link%s into the text, %d of them to the web.",
+				s.Links, plural(s.Links), s.ExternalLinks),
+		})
+	}
+
+	if s.LinksSkipped > 0 {
+		r.Issues = append(r.Issues, Issue{
+			Severity: SeverityInfo,
+			Code:     "LINKS_SKIPPED",
+			Message: fmt.Sprintf("Left %d link%s unlinked: their target is a script, a local file, or another document.",
+				s.LinksSkipped, plural(s.LinksSkipped)),
+		})
+	}
+
 	if s.OCRedPages > 0 {
 		r.Issues = append(r.Issues, Issue{
 			Severity: SeverityInfo,
@@ -243,6 +265,23 @@ func gather(doc idm.Document, paras []render.Paragraph, chapters []string) Signa
 	if len(doc.Pages) > 0 {
 		s.MeanCoverage = coverage / float64(len(doc.Pages))
 	}
+
+	// A link counts when it sits on text the reader can click. Annotations
+	// over a picture or over white space carry no text, so they are counted
+	// separately rather than reported as links that were lost.
+	for _, p := range paras {
+		for _, span := range p.Spans {
+			if span.Href == "" {
+				continue
+			}
+			s.Links++
+			if strings.HasPrefix(span.Href, "http://") || strings.HasPrefix(span.Href, "https://") {
+				s.ExternalLinks++
+			}
+		}
+	}
+	s.LinkAnnotations = len(doc.Links)
+	s.LinksSkipped = doc.Features.LinksSkipped
 
 	s.OutlineEntries = len(doc.Outline)
 	s.Tables = doc.Features.Tables

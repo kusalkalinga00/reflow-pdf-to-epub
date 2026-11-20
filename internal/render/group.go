@@ -109,8 +109,9 @@ func shouldMerge(prev Paragraph, next idm.Block) bool {
 
 func merge(prev Paragraph, next idm.Block) Paragraph {
 	before := prev.Text
+	nextText := strings.TrimSpace(next.Text)
 	prev.Text = normalize.JoinLines(prev.Text, next.Text)
-	prev.Spans = mergeSpans(before, prev.Text, prev.Spans, next.Spans)
+	prev.Spans = mergeSpans(before, prev.Text, prev.Spans, before, next.Spans, nextText)
 	prev.Box = idm.Rect{
 		X0: math.Min(prev.Box.X0, next.BBox.X0),
 		Y0: math.Min(prev.Box.Y0, next.BBox.Y0),
@@ -125,19 +126,33 @@ func merge(prev Paragraph, next idm.Block) Paragraph {
 
 // mergeSpans joins the inline styling of two merged lines.
 //
+// A line with styling is merged with one without it all the time: a sentence
+// carries a link on its first line and continues plain on the next. The plain
+// side becomes one unstyled run, so the styling survives the merge instead of
+// being thrown away with the whole paragraph.
+//
 // The join inserts a space between the lines; the runs keep concatenating to
-// the text because that space is added to the last span of the first line. Any
-// mismatch drops the styling rather than keeping runs that do not reconstruct
-// the paragraph.
-func mergeSpans(before, after string, prev, next []idm.Span) []idm.Span {
-	if len(prev) == 0 || len(next) == 0 {
+// the text because that space is added to the last run of the first line. Any
+// mismatch drops the styling rather than keeping runs that do not describe the
+// paragraph.
+func mergeSpans(prevText, after string, prev []idm.Span, before string, next []idm.Span, nextText string) []idm.Span {
+	if len(prev) == 0 && len(next) == 0 {
 		return nil
 	}
 
-	out := make([]idm.Span, 0, len(prev)+len(next))
-	out = append(out, prev...)
+	left := prev
+	if len(left) == 0 {
+		left = []idm.Span{{Text: prevText}}
+	}
+	right := next
+	if len(right) == 0 {
+		right = []idm.Span{{Text: nextText}}
+	}
+
+	out := make([]idm.Span, 0, len(left)+len(right))
+	out = append(out, left...)
 	out[len(out)-1].Text += " "
-	out = append(out, next...)
+	out = append(out, right...)
 
 	var joined strings.Builder
 	for _, s := range out {

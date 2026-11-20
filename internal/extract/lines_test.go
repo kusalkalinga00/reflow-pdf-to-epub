@@ -222,8 +222,9 @@ func TestLineMarksARaisedMarkerAsSuperscript(t *testing.T) {
 		t.Fatalf("text = %q", l.text)
 	}
 
+	spans := lineSpans(l.styled, nil)
 	var supers []string
-	for _, s := range l.spans {
+	for _, s := range spans {
 		if s.Super {
 			supers = append(supers, s.Text)
 		}
@@ -231,7 +232,7 @@ func TestLineMarksARaisedMarkerAsSuperscript(t *testing.T) {
 	if len(supers) != 1 || supers[0] != "12" {
 		t.Fatalf("superscript spans = %v, want [12]", supers)
 	}
-	if got := joinedSpans(l.spans); got != l.text {
+	if got := joinedSpans(spans); got != l.text {
 		t.Errorf("spans describe %q, text is %q", got, l.text)
 	}
 }
@@ -247,7 +248,7 @@ func TestLineDoesNotLiftPunctuation(t *testing.T) {
 	}
 
 	l := joinPieces(pieces)
-	for _, s := range l.spans {
+	for _, s := range lineSpans(l.styled, nil) {
 		if s.Super {
 			t.Fatalf("punctuation was lifted: %+v", s)
 		}
@@ -263,7 +264,7 @@ func TestLineDoesNotLiftAnAsteriskInsideAWord(t *testing.T) {
 	}
 
 	l := joinPieces(pieces)
-	for _, s := range l.spans {
+	for _, s := range lineSpans(l.styled, nil) {
 		if s.Super {
 			t.Fatalf("an asterisk inside a word was lifted: %+v", s)
 		}
@@ -281,12 +282,107 @@ func TestLineMarksAnOrdinalSuffix(t *testing.T) {
 
 	l := joinPieces(pieces)
 	var supers []string
-	for _, s := range l.spans {
+	for _, s := range lineSpans(l.styled, nil) {
 		if s.Super {
 			supers = append(supers, s.Text)
 		}
 	}
 	if len(supers) != 1 || supers[0] != "nd" {
 		t.Fatalf("superscript spans = %v, want [nd]", supers)
+	}
+}
+
+func TestLineSpansSplitAWordWithoutMovingASpace(t *testing.T) {
+	// "wand1" with the marker attached: the runs split inside the word, so the
+	// text must come back exactly, with no space invented at the boundary.
+	styled := []styledPiece{
+		{text: "w", box: idm.Rect{X0: 100, Y0: 700, X1: 104, Y1: 710}},
+		{text: "a", box: idm.Rect{X0: 104, Y0: 700, X1: 108, Y1: 710}},
+		{text: "n", box: idm.Rect{X0: 108, Y0: 700, X1: 112, Y1: 710}},
+		{text: "d", box: idm.Rect{X0: 112, Y0: 700, X1: 116, Y1: 710}},
+		{text: "1", box: idm.Rect{X0: 116, Y0: 703, X1: 119, Y1: 709}, super: true},
+	}
+
+	spans := lineSpans(styled, nil)
+	if got := joinedSpans(spans); got != "wand1" {
+		t.Fatalf("spans describe %q, want %q", got, "wand1")
+	}
+	if len(spans) != 2 || !spans[1].Super {
+		t.Fatalf("spans = %+v, want the marker split off", spans)
+	}
+}
+
+func TestLineSpansCarryTheLinkUnderTheText(t *testing.T) {
+	styled := []styledPiece{
+		{text: "S", box: idm.Rect{X0: 100, Y0: 700, X1: 104, Y1: 710}},
+		{text: "e", box: idm.Rect{X0: 104, Y0: 700, X1: 108, Y1: 710}},
+		{text: "e", box: idm.Rect{X0: 108, Y0: 700, X1: 112, Y1: 710}},
+		{text: " ", box: idm.Rect{X0: 112, Y0: 700, X1: 115, Y1: 710}},
+		{text: "u", box: idm.Rect{X0: 115, Y0: 700, X1: 119, Y1: 710}},
+		{text: "s", box: idm.Rect{X0: 119, Y0: 700, X1: 123, Y1: 710}},
+	}
+	links := []idm.Link{{
+		Page: 1,
+		Rect: idm.Rect{X0: 114, Y0: 698, X1: 124, Y1: 712},
+		Href: "https://example.com/us",
+	}}
+
+	spans := lineSpans(styled, links)
+	if got := joinedSpans(spans); got != "See us" {
+		t.Fatalf("spans describe %q", got)
+	}
+	if len(spans) != 2 || spans[0].Href != "" || spans[1].Href != "https://example.com/us" {
+		t.Fatalf("spans = %+v, want the link on the word only", spans)
+	}
+}
+
+func TestLineSpansTurnAnInternalLinkIntoAPageReference(t *testing.T) {
+	styled := []styledPiece{
+		{text: "p", box: idm.Rect{X0: 100, Y0: 700, X1: 104, Y1: 710}},
+		{text: " ", box: idm.Rect{X0: 104, Y0: 700, X1: 107, Y1: 710}},
+		{text: "4", box: idm.Rect{X0: 107, Y0: 700, X1: 111, Y1: 710}},
+		{text: "2", box: idm.Rect{X0: 111, Y0: 700, X1: 115, Y1: 710}},
+	}
+	links := []idm.Link{{
+		Page:       1,
+		Rect:       idm.Rect{X0: 106, Y0: 698, X1: 116, Y1: 712},
+		TargetPage: 42,
+	}}
+
+	spans := lineSpans(styled, links)
+	if got := joinedSpans(spans); got != "p 42" {
+		t.Fatalf("spans describe %q", got)
+	}
+	if len(spans) != 2 || spans[1].Href != "#page-42" {
+		t.Fatalf("spans = %+v, want the page reference", spans)
+	}
+}
+
+func TestSafeHrefKeepsOnlySchemesABookCanOffer(t *testing.T) {
+	good := map[string]string{
+		"https://example.com":     "https://example.com",
+		"http://example.com":      "http://example.com",
+		"mailto:me@example.com":   "mailto:me@example.com",
+		"  https://example.com  ": "https://example.com",
+	}
+	for in, want := range good {
+		if got, ok := safeHref(in); !ok || got != want {
+			t.Errorf("safeHref(%q) = %q, %v; want %q", in, got, ok, want)
+		}
+	}
+
+	bad := []string{
+		"javascript:alert(1)",
+		"JavaScript:alert(1)",
+		"data:text/html;base64,PHNjcmlwdD4=",
+		"file:///etc/passwd",
+		"#page-12",
+		"chapter-002.xhtml",
+		"",
+	}
+	for _, in := range bad {
+		if got, ok := safeHref(in); ok {
+			t.Errorf("safeHref(%q) = %q, want rejected", in, got)
+		}
 	}
 }
