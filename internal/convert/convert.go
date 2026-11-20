@@ -169,6 +169,7 @@ func (c *Converter) Run(ctx context.Context, src io.ReaderAt, size int64, doc Do
 	document = c.applyTables(document)
 
 	paras := render.GroupParagraphs(document.Body())
+	render.MarkFootnotes(paras, document.Pages)
 	text := render.ParagraphText(paras)
 
 	report(Progress{Stage: "writing"})
