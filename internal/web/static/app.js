@@ -11,6 +11,7 @@ const result = document.getElementById("result");
 const stats = document.getElementById("stats");
 const download = document.getElementById("download");
 const issues = document.getElementById("issues");
+const quality = document.getElementById("quality");
 const passwordRow = document.getElementById("password-row");
 const passwordInput = document.getElementById("password");
 const submitLabel = document.getElementById("submit-label");
@@ -25,6 +26,7 @@ let objectURL = null;
 let startedAt = 0;
 let cancelRequested = false;
 let lastState = null;
+let lastQuality = null;
 
 function setStatus(message, tone) {
   status.textContent = message;
@@ -48,6 +50,7 @@ function formatElapsed(ms) {
 
 function resetOutput() {
   result.hidden = true;
+  lastQuality = null;
   if (objectURL) {
     URL.revokeObjectURL(objectURL);
     objectURL = null;
@@ -145,6 +148,10 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
+if (reportToggle) {
+  reportToggle.addEventListener("change", renderReport);
+}
+
 cancel.addEventListener("click", async () => {
   if (!currentJob) return;
   cancelRequested = true;
@@ -239,24 +246,15 @@ async function finishJob(state) {
   const report = state.quality || {};
   const tier = report.tier || "";
   const score = report.score || "";
-  const showReport = !reportToggle || reportToggle.checked;
 
   objectURL = URL.createObjectURL(blob);
   download.href = objectURL;
   download.download = currentFile.name.replace(/\.pdf$/i, "") + ".epub";
-  stats.textContent = state.pages + " pages · " + state.chapters + " chapters" +
-    (showReport ? " · " + tierLabel(tier) + " " + score + "/100" : "") +
-    " · " + formatSize(blob.size);
+  stats.textContent = state.pages + " pages · " + state.chapters + " chapters · " +
+    formatSize(blob.size);
 
-  issues.replaceChildren();
-  const warnings = showReport
-    ? (report.issues || []).filter((i) => i.severity === "warn")
-    : [];
-  for (const issue of warnings.slice(0, 3)) {
-    const item = document.createElement("li");
-    item.textContent = issue.message;
-    issues.appendChild(item);
-  }
+  lastQuality = { tier, score, issues: report.issues || [] };
+  renderReport();
 
   // The result card says everything the progress line would; leave the bar
   // behind so the finished state is one clean card.
@@ -264,6 +262,34 @@ async function finishJob(state) {
   result.hidden = false;
   setStatus("Done. Your EPUB is ready.", "ok");
   download.focus();
+}
+
+// The switch only decides whether the verdict is shown; the engine always
+// measures and validates. Re-rendering on change makes that visible without
+// converting again.
+function renderReport() {
+  if (!lastQuality) {
+    quality.hidden = true;
+    issues.replaceChildren();
+    return;
+  }
+
+  const show = !reportToggle || reportToggle.checked;
+  quality.hidden = !show;
+  issues.replaceChildren();
+  if (!show) {
+    return;
+  }
+
+  const warnings = lastQuality.issues.filter((i) => i.severity === "warn");
+  quality.textContent = "Quality · " + tierLabel(lastQuality.tier) + " " +
+    lastQuality.score + "/100" + (warnings.length === 0 ? " · No warnings" : "");
+
+  for (const issue of warnings.slice(0, 3)) {
+    const item = document.createElement("li");
+    item.textContent = issue.message;
+    issues.appendChild(item);
+  }
 }
 
 function handleError(err) {
