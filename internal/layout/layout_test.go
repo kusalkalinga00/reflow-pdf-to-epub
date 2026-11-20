@@ -446,3 +446,43 @@ func TestBlocksOnOneLineReadLeftToRight(t *testing.T) {
 		t.Errorf("order = %v, want %v", got, want)
 	}
 }
+
+func TestFurnitureRepeatedOnConsecutivePagesIsRemoved(t *testing.T) {
+	// One real book kept its footer on the first eight pages only, split
+	// into a page number and a title; the rest of the book had a merged
+	// footer. A global majority test leaves the eight-page variant behind,
+	// so consecutive repetition at the page edge has to count.
+	var blocks []idm.Block
+	for page := 1; page <= 10; page++ {
+		blocks = append(blocks, block("Body text.", page, 72, 700, 500, 710))
+	}
+	for page := 2; page <= 4; page++ {
+		blocks = append(blocks,
+			block("P a g e | "+string(rune('0'+page)), page, 22, 15, 74, 25),
+			block("The Book Title – The Author", page, 90, 15, 343, 25),
+		)
+	}
+	// Two consecutive pages are not a running head.
+	blocks = append(blocks,
+		block("Only here", 8, 72, 15, 300, 25),
+		block("Only here", 9, 72, 15, 300, 25),
+	)
+
+	out := Apply(document(10, blocks...))
+
+	furniture := 0
+	for _, b := range out.Blocks {
+		if b.Kind.IsFurniture() {
+			furniture++
+		}
+	}
+	if furniture != 6 {
+		t.Errorf("furniture blocks = %d, want 6 (two lines on pages 2-4)", furniture)
+	}
+
+	for _, b := range out.Blocks {
+		if b.Text == "Only here" && b.Kind.IsFurniture() {
+			t.Error("a footer on two pages was removed; three is the threshold")
+		}
+	}
+}

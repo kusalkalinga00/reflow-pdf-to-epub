@@ -563,11 +563,13 @@ func abs(f float64) float64 {
 	return f
 }
 
-// images collects JPEG figures from a page.
+// images collects the figures on a page.
 //
 // Raw JPEG data can be embedded in an EPUB untouched, which keeps quality and
-// costs no re-encoding. Other encodings (Flate, JPEG 2000, CCITT) are counted
-// as skipped rather than decoded and re-encoded: silence would be worse than a
+// costs no re-encoding. Flate images are rebuilt from their samples into a
+// PNG. Everything else — indexed palettes, CMYK, JPEG 2000 — goes through the
+// image object's own bitmap, which PDFium rasterises for us. Only an object
+// PDFium cannot rasterise is counted as skipped: silence would be worse than a
 // reported gap.
 func (e *PDFium) images(doc references.FPDF_DOCUMENT, index int) ([]idm.Block, int) {
 	page := requests.Page{ByIndex: &requests.PageByIndex{Document: doc, Index: index}}
@@ -666,7 +668,11 @@ func (e *PDFium) imageObject(obj references.FPDF_PAGEOBJECT, meta structs.FPDF_I
 
 	img := samplesToImage(decoded.Data, int(meta.Width), int(meta.Height), meta.Colorspace, int(meta.BitsPerPixel))
 	if img == nil {
-		return nil, false
+		// Indexed palettes have no samples we can map without the palette,
+		// and CMYK/JPEG 2000 are not in Go's image packages. The image
+		// object's bitmap is PDFium's own rasterisation of the image, so it
+		// works for all of them.
+		return e.imageBitmap(obj)
 	}
 
 	var buf bytes.Buffer
@@ -680,6 +686,100 @@ func (e *PDFium) imageObject(obj references.FPDF_PAGEOBJECT, meta structs.FPDF_I
 		PixelWidth:  int(meta.Width),
 		PixelHeight: int(meta.Height),
 	}, true
+}
+
+// imageBitmap rasterises the image object itself and encodes it as a PNG.
+//
+// FPDFImageObj_GetBitmap renders the image at its own pixel size and decodes
+// every colour space PDFium supports, including indexed palettes. It ignores
+// an image mask, so a masked image loses transparency; that is still better
+// than dropping the figure, and it is why the PNG path is a fallback rather
+// than the default.
+func (e *PDFium) imageBitmap(obj references.FPDF_PAGEOBJECT) (*idm.Image, bool) {
+	bitmap, err := e.instance.FPDFImageObj_GetBitmap(&requests.FPDFImageObj_GetBitmap{
+		ImageObject: obj,
+	})
+	if err != nil {
+		return nil, false
+	}
+	defer e.instance.FPDFBitmap_Destroy(&requests.FPDFBitmap_Destroy{Bitmap: bitmap.Bitmap})
+
+	width, err := e.instance.FPDFBitmap_GetWidth(&requests.FPDFBitmap_GetWidth{Bitmap: bitmap.Bitmap})
+	if err != nil || width.Width <= 0 {
+		return nil, false
+	}
+	height, err := e.instance.FPDFBitmap_GetHeight(&requests.FPDFBitmap_GetHeight{Bitmap: bitmap.Bitmap})
+	if err != nil || height.Height <= 0 {
+		return nil, false
+	}
+	stride, err := e.instance.FPDFBitmap_GetStride(&requests.FPDFBitmap_GetStride{Bitmap: bitmap.Bitmap})
+	if err != nil || stride.Stride <= 0 {
+		return nil, false
+	}
+	format, err := e.instance.FPDFBitmap_GetFormat(&requests.FPDFBitmap_GetFormat{Bitmap: bitmap.Bitmap})
+	if err != nil {
+		return nil, false
+	}
+	buffer, err := e.instance.FPDFBitmap_GetBuffer(&requests.FPDFBitmap_GetBuffer{Bitmap: bitmap.Bitmap})
+	if err != nil {
+		return nil, false
+	}
+
+	img := bitmapImage(buffer.Buffer, width.Width, height.Height, stride.Stride, format.Format)
+	if img == nil {
+		return nil, false
+	}
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, false
+	}
+
+	return &idm.Image{
+		Data:        buf.Bytes(),
+		MediaType:   "image/png",
+		PixelWidth:  width.Width,
+		PixelHeight: height.Height,
+	}, true
+}
+
+// bitmapImage converts PDFium's bitmap formats into a Go image. The formats
+// are its own: gray, and blue-green-red with or without alpha, each 8-bit.
+func bitmapImage(data []byte, width, height, stride int, format enums.FPDF_BITMAP_FORMAT) image.Image {
+	if width <= 0 || height <= 0 || stride <= 0 || len(data) < stride*height {
+		return nil
+	}
+
+	rect := image.Rect(0, 0, width, height)
+
+	switch format {
+	case enums.FPDF_BITMAP_FORMAT_GRAY:
+		img := image.NewGray(rect)
+		for y := 0; y < height; y++ {
+			copy(img.Pix[y*img.Stride:y*img.Stride+width], data[y*stride:y*stride+width])
+		}
+		return img
+
+	case enums.FPDF_BITMAP_FORMAT_BGR, enums.FPDF_BITMAP_FORMAT_BGRX, enums.FPDF_BITMAP_FORMAT_BGRA:
+		img := image.NewRGBA(rect)
+		pixel := 4
+		if format == enums.FPDF_BITMAP_FORMAT_BGR {
+			pixel = 3
+		}
+		for y := 0; y < height; y++ {
+			row := data[y*stride:]
+			out := img.Pix[y*img.Stride:]
+			for x := 0; x < width; x++ {
+				out[x*4+0] = row[x*pixel+2]
+				out[x*4+1] = row[x*pixel+1]
+				out[x*4+2] = row[x*pixel+0]
+				out[x*4+3] = 0xff
+			}
+		}
+		return img
+	}
+
+	return nil
 }
 
 // samplesToImage turns decoded PDF samples into a Go image for the colour
