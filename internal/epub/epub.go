@@ -97,6 +97,18 @@ figcaption {
 .cover img {
   max-height: 100vh;
 }
+aside.footnote {
+  margin: 1.5em 0 0;
+  padding-top: 0.6em;
+  border-top: 1px solid #bbb;
+  font-size: 0.85em;
+}
+aside.footnote p {
+  margin: 0 0 0.4em;
+}
+a.backlink {
+  text-decoration: none;
+}
 `
 
 // Book is everything the writer needs. The zero value is invalid: a book needs
