@@ -524,7 +524,7 @@ func markFurniture(byPage [][]idm.Block, pages []idm.Page) {
 
 	repeated := make(map[key]bool, len(seen))
 	for k, pageSet := range seen {
-		if len(pageSet) >= threshold {
+		if len(pageSet) >= threshold || hasConsecutiveRun(pageSet, furnitureRun) {
 			repeated[k] = true
 		}
 	}
@@ -555,6 +555,45 @@ func markFurniture(byPage [][]idm.Block, pages []idm.Page) {
 			}
 		}
 	}
+}
+
+// furnitureRun is the number of consecutive pages at whose edge the same text
+// makes it running furniture, even when it is not the book's majority form.
+//
+// A producer can change the header or footer partway through, or put it in
+// two blocks for the first chapter and one block after that. A global "half
+// the pages" test then leaves the minority variant in the text: one real book
+// kept its footer on the first eight pages, where the page number and title
+// were separate blocks. Text repeated at the page edge on consecutive pages
+// is still repetition.
+const furnitureRun = 3
+
+// hasConsecutiveRun reports whether the page set contains a run of at least
+// n consecutive page indices.
+func hasConsecutiveRun(pages map[int]bool, n int) bool {
+	if n <= 1 || len(pages) < n {
+		return false
+	}
+
+	last := 0
+	for page := range pages {
+		if page > last {
+			last = page
+		}
+	}
+
+	count := 0
+	for page := 0; page <= last; page++ {
+		if !pages[page] {
+			count = 0
+			continue
+		}
+		count++
+		if count >= n {
+			return true
+		}
+	}
+	return false
 }
 
 // maskDigits replaces digit runs with a placeholder so that "Page 42" and
