@@ -50,6 +50,10 @@ What comes out:
   cells, not as a column of loose words.
 - **Running headers and footers removed** (268 of them from one book), page numbers masked so the
   repeated edge is recognised rather than guessed.
+- **Footnotes kept as footnotes**: a marked, small-type paragraph at the foot of a page becomes an
+  EPUB `footnote` aside, linked to its reference when a raised marker in the text matches it.
+- **Superscripts stay superscripts** — footnote markers and ordinal suffixes keep their raised
+  type instead of arriving as inline digits.
 - **A print page list**, so "go to page 42" still works in a reflowed book.
 - **Figures embedded** — JPEG, PNG, grayscale and CMYK — and page breaks marked with EPUB
   `pagebreak` semantics.
@@ -102,6 +106,7 @@ What a book carries:
 | Tables | Ruled regions, or a ruled region split at its content change; cells rebuilt from words |
 | Figures | Embedded once per unique image, referenced from every place it appears |
 | Cover | The first page-sized figure near the front — including a cover whose title was read off the artwork by OCR — declared as the cover image |
+| Footnotes | A marked, small-type paragraph at the foot of a page becomes an `aside epub:type="footnote"`; its reference is a link when a raised marker on the same page matches |
 | Running heads | Detected by masked repetition across pages, removed from the text |
 | Metadata | Title, authors, language, publisher, and a content-derived identifier |
 
@@ -151,7 +156,7 @@ design and the alternatives that were rejected are in [PROPOSAL.md](PROPOSAL.md)
 | Normalize | `normalize` | Ligatures, Unicode forms, soft hyphens, control characters | "ﬁ" reaching the reader as a glyph that will not select |
 | Layout | `layout` | Reading order and running headers | Two columns read as one interleaved column |
 | Tables | `tables` | Ruled regions to grids, content split when the rule is missing | A table flattened into a column of stray words |
-| Render | `render` | Paragraphs, chapters, section anchors, page anchors | Structure lost between extraction and the EPUB |
+| Render | `render` | Paragraphs, chapters, footnotes, inline superscripts, section and page anchors | Structure lost between extraction and the EPUB |
 | Assemble | `epub` | Container, OPF, nav, NCX, accessibility metadata, archive | A book a reader opens to a blank page |
 | Judge | `score`, `validate` | Tiers, score, issues, EPUBCheck | A book that validates nowhere but ships anyway |
 
@@ -504,7 +509,11 @@ job API shows page progress; the CLI prints when it is done. This is not a netwo
 ## Known limits
 
 - **No math OCR.** Equations with no text layer are not recovered. Math is an explicit non-goal.
-- **No footnote reconstruction.** A marker stays where it was drawn, as inline text.
+- **Footnote detection is geometric.** A note is a short, small-type paragraph in the bottom third
+  of a page that starts with a marker (a number, `*`, `†`, `‡`, `§`). A note that runs above the
+  bottom third, or has no marker, stays as body text. A reference is linked only when a raised
+  marker on the same page matches exactly; an ambiguous match is left as plain superscript text
+  rather than jumping to the wrong note.
 - **Vector figures and alpha** are not preserved: a PDF's vector art becomes an embedded raster or
   is skipped, and PNG alpha is flattened.
 - **Scans stay T2.** OCR recovers text, but the page-image fallback that would make a scan a
