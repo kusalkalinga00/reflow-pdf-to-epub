@@ -264,6 +264,42 @@ func gather(doc idm.Document, paras []render.Paragraph, chapters []string) Signa
 	return s
 }
 
+// Facsimile scores a page-image book.
+//
+// The layout is faithful — every page is the page the producer drew — and the
+// loss is that none of it is text: not selectable, not searchable, and not
+// reflowable. That loss is named and costs a fixed 35 points; pages that could
+// not be rendered cost more.
+func Facsimile(pages, rendered, chapters int) Report {
+	s := Signals{
+		Pages:           pages,
+		Chapters:        chapters,
+		Figures:         rendered,
+		FiguresEmbedded: rendered,
+	}
+	r := Report{Signals: s, Tier: TierFacsimile}
+
+	score := 65
+	r.Issues = append(r.Issues, Issue{
+		Severity: SeverityWarn,
+		Code:     "PAGE_IMAGES",
+		Message:  fmt.Sprintf("Page-image book: %d pages are images. The text is not selectable or searchable.", rendered),
+	})
+
+	if missing := pages - rendered; missing > 0 {
+		score -= min(30, 5*missing)
+		r.Issues = append(r.Issues, Issue{
+			Severity: SeverityWarn,
+			Code:     "PAGES_MISSING",
+			Message:  fmt.Sprintf("%d page%s could not be rendered.", missing, plural(missing)),
+		})
+	}
+
+	r.Score = clamp(score, 1, 100)
+	r.Summary = fmt.Sprintf("Page images: %d pages rendered. The layout is faithful; the text is not selectable.", rendered)
+	return r
+}
+
 func isGenericTitle(title string) bool {
 	switch strings.ToLower(strings.TrimSpace(title)) {
 	case "", "content", "untitled", "body":
