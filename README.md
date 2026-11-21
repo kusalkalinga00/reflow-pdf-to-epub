@@ -314,8 +314,8 @@ docker compose up -d --build
 Then open <http://localhost:8080>, drop in a PDF, press **Convert**, and the EPUB downloads with
 its quality report. `docker compose logs -f` shows progress; `docker compose down` stops it.
 
-Every push to `main` also publishes a prebuilt multi-arch image, so you can
-skip the build entirely:
+Release tags publish a prebuilt multi-arch image, so you can skip the build
+entirely once a release exists:
 
 ```sh
 docker run --rm -p 127.0.0.1:8080:8080 \
@@ -329,6 +329,12 @@ by default — extend the image with `tesseract-ocr-<lang>` for more languages.
 A GitHub package starts private even when the repository is public. To let
 anyone pull the image, open the package's settings and change its visibility
 once (GitHub → your profile → Packages → the image → *Change visibility*).
+
+While the package is **private**, it counts against the Free plan's 500 MB of
+Packages storage — shared with Actions caches — and the multi-arch image is
+about 350 MB compressed. That is why images are published on release tags
+rather than on every push. Once the repository and the package are public,
+image storage and transfer are free.
 
 ### Running it safely
 
@@ -347,6 +353,17 @@ loopback interface and let the proxy own the public port.
 loopback address, which is why the compose logs show that line. Inside the
 container `0.0.0.0` is correct; the protection comes from publishing the port
 on `127.0.0.1` only.
+
+If the service has to be reachable by others, put a password on it:
+
+```sh
+REFLOW_PASSWORD='something long' docker compose up -d
+# or, from source: reflow serve -addr 0.0.0.0:8080 -user reader -password '...'
+```
+
+That gates the UI and the API behind HTTP Basic authentication — the health
+check stays open for the container's own probe. It is a lock, not encryption:
+use it behind TLS, never over plain HTTP on a network you do not control.
 
 Uploads are converted in memory and the finished EPUB is served back; nothing
 is written to disk except temporary files the OS cleans up. The job list lives
