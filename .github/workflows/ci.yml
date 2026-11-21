@@ -73,6 +73,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # govulncheck loads the real build graph, and that graph contains cgo.
+      # Without PDFium it fails to load go-pdfium instead of analysing it.
+      - name: Install PDFium
+        run: |
+          ./scripts/pdfium.sh
+          echo "PKG_CONFIG_PATH=$PWD/.pdfium/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$PWD/.pdfium/lib" >> "$GITHUB_ENV"
+
       # govulncheck is the Go team's database of reachable vulnerabilities:
       # it reports a CVE only when the vulnerable code is actually called.
       - name: govulncheck
