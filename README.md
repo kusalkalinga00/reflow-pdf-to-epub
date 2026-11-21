@@ -21,7 +21,7 @@ deck, a 250-page novel, a CV and an invoice — and two of those are transcribed
 6. [Tables are recovered, or named as lost](#tables-are-recovered-or-named-as-lost)
 7. [Measuring quality](#measuring-quality)
 8. [What it refuses](#what-it-refuses)
-9. [Install](#install)
+9. [Install and run](#install-and-run)
 10. [CLI](#cli)
 11. [The web app](#the-web-app)
 12. [Repository layout](#repository-layout)
@@ -297,40 +297,71 @@ them quietly.
 
 ---
 
-## Install
+## Install and run
 
-**Binaries** — `reflow_<version>_<os>_<arch>.tar.gz` for Linux amd64 and macOS amd64/arm64, plus a
-sha256 beside each. The archive holds the CLI and the PDFium library beside it, found through a
-relative rpath, so nothing needs installing:
+Reflow is one binary plus three things it shells out to: PDFium for rendering,
+Tesseract for scans and a JRE for EPUBCheck. The container image carries all of
+them, which is the shortest path from a clone to a working book.
+
+### Docker (recommended)
 
 ```sh
-tar xzf reflow_0.2.0_darwin_arm64.tar.gz
-./reflow convert book.pdf -o book.epub
+git clone https://github.com/kusalkalinga00/tool-factory-epub-convertor.git
+cd tool-factory-epub-convertor
+docker compose up -d --build
 ```
 
-**Container** — Linux amd64 and arm64:
+Then open <http://localhost:8080>, drop in a PDF, press **Convert**, and the EPUB downloads with
+its quality report. `docker compose logs -f` shows progress; `docker compose down` stops it.
+
+Every push to `main` also publishes a prebuilt multi-arch image, so you can
+skip the build entirely:
 
 ```sh
 docker run --rm -p 127.0.0.1:8080:8080 \
   ghcr.io/kusalkalinga00/tool-factory-epub-convertor:latest
 ```
 
-The image carries PDFium, Tesseract and a JRE for EPUBCheck, so scanned pages are read and every
-book is validated before it is served. That completeness is why it is roughly 650 MB; OCR is
-English by default — extend the image with a `tesseract-ocr-<lang>` package for more. `/healthz`
-is there for a proxy or orchestrator.
+The image is about 650 MB: PDFium, Tesseract and a headless JRE. OCR is English
+by default — extend the image with `tesseract-ocr-<lang>` for more languages.
+`/healthz` answers for proxies and orchestrators.
 
-> Reflow has no accounts and no authentication. Publish the port to your own machine
-> (`127.0.0.1:` above) or put it behind a proxy that authenticates; do not bind it to a public
-> interface as-is.
+A GitHub package starts private even when the repository is public. To let
+anyone pull the image, open the package's settings and change its visibility
+once (GitHub → your profile → Packages → the image → *Change visibility*).
 
-**From source** — Go 1.27+, a C toolchain and `pkg-config`:
+### Running it safely
+
+Reflow has **no accounts and no authentication**. It converts whatever it is
+given and serves the result to whoever asks. So:
+
+- the compose file publishes the port on `127.0.0.1` only — keep it there, or
+- put it behind a proxy that authenticates and terminates TLS, and raise the
+  port binding only for that proxy.
+
+A common shape is Caddy or nginx on the same host: it terminates TLS, demands a
+login, and proxies to `127.0.0.1:8080`. In compose terms, bind Reflow to the
+loopback interface and let the proxy own the public port.
+
+`reflow serve` warns on startup whenever it binds to anything other than a
+loopback address, which is why the compose logs show that line. Inside the
+container `0.0.0.0` is correct; the protection comes from publishing the port
+on `127.0.0.1` only.
+
+Uploads are converted in memory and the finished EPUB is served back; nothing
+is written to disk except temporary files the OS cleans up. The job list lives
+in memory, so restarting the container discards results. Files bigger than the
+ingest limit (200 MB by default) are refused before parsing.
+
+### From source
+
+Go 1.27+, a C toolchain, `pkg-config`, and optionally Tesseract and a JRE:
 
 ```sh
 make deps       # pinned PDFium SDK into .pdfium/ (gitignored)
 make build      # bin/reflow
 make check      # gofmt, go.mod tidy, vet, tests with -race
-make docker     # container image tagged reflow:latest
+make up         # or: make docker, then make docker-run
 
 make run -- serve                              # run from source, no build step
 make run -- convert book.pdf -o book.epub
@@ -340,9 +371,9 @@ make run ARGS='inspect "a file with spaces.pdf"'   # paths with spaces
 `make run --` forwards the words after it to the CLI; a path with spaces needs
 the `ARGS=` form so the shell keeps it together.
 
-`make deps` also fetches EPUBCheck 5.4.0. Tesseract is optional: without it, scanned pages stay
-empty and the report says so. Release archives are produced by `.github/workflows/release.yml` on
-a `v*` tag; the image is pushed to GHCR and every pull request build is smoke-tested.
+`make deps` also fetches EPUBCheck 5.4.0. Tesseract is optional: without it,
+scanned pages stay empty and the report says which pages are missing. Release
+archives are produced by `.github/workflows/release.yml` on a `v*` tag.
 
 ---
 
@@ -544,4 +575,10 @@ job API shows page progress; the CLI prints when it is done. This is not a netwo
 
 ## Licence
 
-MIT — see [LICENSE](LICENSE).
+Apache-2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+Reflow bundles other people's work: PDFium (BSD-3-Clause), pdfcpu (Apache-2.0),
+go-pdfium (MIT), and at runtime Tesseract (Apache-2.0) and EPUBCheck
+(BSD-3-Clause). [THIRD_PARTY.md](THIRD_PARTY.md) says what is linked, what is
+installed, and where each licence text lives. The container image carries the
+full set under `/usr/share/doc/reflow/`.
