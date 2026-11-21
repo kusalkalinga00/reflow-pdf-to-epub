@@ -1,8 +1,8 @@
 name: codeql
 
-# Static analysis for the Go code. `build-mode: none` means CodeQL reads the
-# source instead of compiling it, so the job does not need PDFium, Tesseract or
-# a JRE; the build with CGO stays the job of ci.yml.
+# Static analysis for the Go code. Go has no source-only build mode in CodeQL,
+# so the database is built from a real compile — which means PDFium, because the
+# extractor links go-pdfium through cgo.
 on:
   push:
     branches: [main]
@@ -32,11 +32,26 @@ jobs:
         with:
           persist-credentials: false
 
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - uses: github/codeql-action/init@51f77329afa6477de8c49fc9c7046c15b9a4e79d # v3.29.5
         with:
           languages: go
-          build-mode: none
+          build-mode: manual
           queries: security-and-quality
+
+      - name: Install PDFium
+        run: |
+          ./scripts/pdfium.sh
+          echo "PKG_CONFIG_PATH=$PWD/.pdfium/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$PWD/.pdfium/lib" >> "$GITHUB_ENV"
+
+      # The database is built from this compile, so it has to be the real one.
+      - name: Build for the extractor
+        run: go build ./...
 
       - uses: github/codeql-action/analyze@51f77329afa6477de8c49fc9c7046c15b9a4e79d # v3.29.5
         with:

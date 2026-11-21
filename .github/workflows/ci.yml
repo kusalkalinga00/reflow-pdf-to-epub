@@ -89,8 +89,10 @@ jobs:
 
       # govulncheck is the Go team's database of reachable vulnerabilities:
       # it reports a CVE only when the vulnerable code is actually called.
+      # v1.10.0 is the first line that understands Go 1.27's syntax tree;
+      # v1.1.4 panics on composite literals it has no case for.
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 
   docker:
     name: container image
