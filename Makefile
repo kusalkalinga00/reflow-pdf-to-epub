@@ -38,6 +38,18 @@ IMAGE ?= reflow
 docker:
 	docker build --build-arg VERSION=$(VERSION) -t $(IMAGE):$(VERSION) -t $(IMAGE):latest .
 
+## up: build and start the web app on http://localhost:8080
+up:
+	docker compose up -d --build
+
+## down: stop the web app
+down:
+	docker compose down
+
+## docker-run: run the built image in the foreground, loopback only
+docker-run:
+	docker run --rm -p 127.0.0.1:8080:8080 $(IMAGE):latest
+
 ## test: run the suite with the race detector
 test: deps
 	go test -race -count=1 ./...
