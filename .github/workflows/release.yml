@@ -7,8 +7,7 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 env:
   MODULE: github.com/kusalkalinga00/reflow-pdf-to-epub
@@ -18,6 +17,8 @@ jobs:
     name: ${{ matrix.goos }}/${{ matrix.goarch }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -29,9 +30,9 @@ jobs:
           - { os: macos-14, goos: darwin, goarch: arm64 }
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
           go-version-file: go.mod
           cache: true
@@ -94,7 +95,7 @@ jobs:
             shasum -a 256 "$ARCHIVE" > "$ARCHIVE.sha256"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-${{ matrix.goos }}-${{ matrix.goarch }}
           path: |
@@ -105,14 +106,16 @@ jobs:
     name: publish release
     needs: binaries
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
 
       - name: Publish
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8 # v2.3.2
         with:
           files: |
             dist/*.tar.gz
@@ -123,21 +126,24 @@ jobs:
     name: container image
     needs: binaries
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64

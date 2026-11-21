@@ -9,6 +9,7 @@ package web
 
 import (
 	"context"
+	"crypto/subtle"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -43,6 +44,11 @@ type Options struct {
 	Concurrency int
 	// ConvertTimeout bounds one conversion. Zero means 10 minutes.
 	ConvertTimeout time.Duration
+	// Username and Password, when both are set, gate every request except the
+	// health check behind HTTP Basic authentication. This is a lock on the
+	// door, not encryption: run it behind TLS or on loopback.
+	Username string
+	Password string
 }
 
 // Server serves the UI and the conversion endpoint.
@@ -87,6 +93,13 @@ func New(converter Converter, opts Options) *Server {
 	mux.Handle("/", s.staticHandler())
 
 	s.handler = securityHeaders(mux)
+	if opts.Password != "" {
+		user := opts.Username
+		if user == "" {
+			user = "reflow"
+		}
+		s.handler = basicAuth(s.handler, user, opts.Password)
+	}
 	return s
 }
 
@@ -256,13 +269,46 @@ func epubName(name string) string {
 	return strings.TrimSpace(b.String()) + ".epub"
 }
 
+// basicAuth requires HTTP Basic credentials on every path but /healthz.
+//
+// The comparison is constant time on purpose: the password is the only secret
+// in the deployment, and a byte-by-byte early exit is a timing oracle. The
+// health check stays open so a container healthcheck or proxy needs no
+// credentials of its own.
+func basicAuth(next http.Handler, username, password string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		user, pass, ok := r.BasicAuth()
+		if !ok || !constantTimeEqual(user, username) || !constantTimeEqual(pass, password) {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Reflow", charset="UTF-8"`)
+			http.Error(w, "authentication required", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// constantTimeEqual compares two secrets without leaking the position of the
+// first mismatch through timing. Length is not secret; the bytes are.
+func constantTimeEqual(got, want string) bool {
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		h.Set("Cross-Origin-Opener-Policy", "same-origin")
+		h.Set("Cross-Origin-Resource-Policy", "same-origin")
 		h.Set("Content-Security-Policy",
-			"default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'")
+			"default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 		next.ServeHTTP(w, r)
 	})
 }

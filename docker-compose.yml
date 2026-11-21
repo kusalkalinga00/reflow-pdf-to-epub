@@ -26,6 +26,11 @@ services:
       - 0.0.0.0:8080
       - -jobs
       - "2"
+    # A password gates the UI and the API behind HTTP Basic authentication.
+    # It is a lock, not encryption: terminate TLS in front of it.
+    environment:
+      REFLOW_USER: reflow
+      REFLOW_PASSWORD: ${REFLOW_PASSWORD:-}
     # Uncomment to raise the upload limit (default is the ingest limit, 200 MB).
     # - -max-mb
     # - "400"

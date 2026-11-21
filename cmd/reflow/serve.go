@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,10 +25,13 @@ func serveCmd(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprint(stderr, `usage: reflow serve [-addr host:port]
+		fmt.Fprint(stderr, `usage: reflow serve [-addr host:port] [-user name] [-password secret]
 
-Start the local conversion UI. It binds to localhost by default and is not
-meant to be exposed to a network.
+Start the conversion UI. It binds to localhost by default and has no accounts;
+reach it through a loopback interface or an authenticating proxy.
+
+Setting a password (or REFLOW_PASSWORD) gates the UI and the API behind HTTP
+Basic authentication. That is a lock, not encryption: use it behind TLS.
 `)
 	}
 
@@ -36,6 +40,8 @@ meant to be exposed to a network.
 	concurrency := fs.Int("jobs", 2, "conversions allowed at once")
 	useOCR := fs.Bool("ocr", true, "read pages with no text layer using tesseract")
 	useValidation := fs.Bool("validate", true, "reject books that fail EPUBCheck")
+	user := fs.String("user", envOr("REFLOW_USER", "reflow"), "basic-auth user name, when a password is set")
+	password := fs.String("password", os.Getenv("REFLOW_PASSWORD"), "basic-auth password; REFLOW_PASSWORD works too")
 
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
@@ -78,10 +84,16 @@ meant to be exposed to a network.
 	server := web.New(converters, web.Options{
 		MaxUpload:   int64(*maxMB) << 20,
 		Concurrency: converters.Size(),
+		Username:    *user,
+		Password:    *password,
 	})
 
 	if !loopbackAddr(*addr) {
-		fmt.Fprintf(stderr, "reflow: warning: %s is reachable from the network and Reflow has no authentication; put it behind a proxy\n", *addr)
+		if *password == "" {
+			fmt.Fprintf(stderr, "reflow: warning: %s is reachable from the network and Reflow has no authentication; set -password or put it behind a proxy\n", *addr)
+		} else {
+			fmt.Fprintf(stderr, "reflow: basic authentication is on; credentials cross the wire in clear text, so terminate TLS in front of %s\n", *addr)
+		}
 	}
 
 	httpServer := &http.Server{
@@ -121,6 +133,14 @@ meant to be exposed to a network.
 
 	fmt.Fprintln(stdout, "stopped")
 	return exitOK
+}
+
+// envOr is a flag default taken from the environment.
+func envOr(name, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+		return v
+	}
+	return fallback
 }
 
 // loopbackAddr reports whether an address only accepts local connections.
