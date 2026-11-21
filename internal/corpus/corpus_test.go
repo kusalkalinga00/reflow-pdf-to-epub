@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/corpus"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/corpus"
 )
 
 // TestSyntheticCorpusPasses is the regression gate. Every case in the built-in

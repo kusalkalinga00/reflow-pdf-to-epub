@@ -10,7 +10,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/idm"
 )
 
 // Rule is one drawn line segment.

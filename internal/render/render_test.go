@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/epub"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/epub"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/idm"
 )
 
 func document(blocks []idm.Block, pages int) idm.Document {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ocr"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/convert"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/ocr"
 )
 
 // Thresholds a case must meet to pass. They are deliberately strict: the

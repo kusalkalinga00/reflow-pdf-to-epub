@@ -17,17 +17,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/epub"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/extract"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ingest"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/layout"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/normalize"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ocr"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/render"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/score"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/tables"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/validate"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/epub"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/extract"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/idm"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/ingest"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/layout"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/normalize"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/ocr"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/render"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/score"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/tables"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/validate"
 )
 
 // ErrInvalidOutput means the book was built but the reference validator

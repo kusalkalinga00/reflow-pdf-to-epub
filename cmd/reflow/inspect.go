@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"text/tabwriter"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ingest"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/ingest"
 )
 
 func inspect(args []string, stdout, stderr io.Writer) int {

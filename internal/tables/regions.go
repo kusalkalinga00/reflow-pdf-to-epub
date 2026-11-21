@@ -4,7 +4,7 @@ import (
 	"math"
 	"sort"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/idm"
 )
 
 // A region is the area between two or more horizontal rules that share an x

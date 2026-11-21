@@ -34,7 +34,7 @@ RUN ./scripts/pdfium.sh \
 	&& mkdir -p /out/epubcheck \
 	&& cp -R "$(dirname "$(find .epubcheck -name epubcheck.jar | head -1)")/." /out/epubcheck/ \
 	&& CGO_ENABLED=1 go build -trimpath \
-		-ldflags "-s -w -X github.com/kusalkalinga00/tool-factory-epub-convertor/internal/version.Version=${VERSION}" \
+		-ldflags "-s -w -X github.com/kusalkalinga00/reflow-pdf-to-epub/internal/version.Version=${VERSION}" \
 		-o /out/reflow ./cmd/reflow
 
 FROM debian:bookworm-slim

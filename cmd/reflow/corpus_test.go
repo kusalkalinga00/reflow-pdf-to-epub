@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/corpus"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/testpdf"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/corpus"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/testpdf"
 )
 
 func TestCorpusPasses(t *testing.T) {
