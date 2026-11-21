@@ -1,0 +1,18 @@
+Reflow
+Copyright 2026 Kusal Kalinga
+
+This product is licensed under the Apache License, Version 2.0. See LICENSE.
+
+It includes the following third-party software. Their notices and licences are
+reproduced in THIRD_PARTY.md and, for the container image, under
+/usr/share/doc/reflow/.
+
+  PDFium               BSD-3-Clause
+  pdfium-binaries      MIT
+  go-pdfium            MIT
+  pdfcpu               Apache-2.0
+  Tesseract OCR        Apache-2.0
+  EPUBCheck            BSD-3-Clause
+
+This product also includes source code from the Go standard library and
+golang.org/x modules, covered by their respective BSD-3-Clause licences.

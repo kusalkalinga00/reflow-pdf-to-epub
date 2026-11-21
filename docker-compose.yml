@@ -1,0 +1,34 @@
+# One command to run Reflow locally:
+#
+#   docker compose up -d --build
+#   open http://localhost:8080
+#
+# The port is published to 127.0.0.1 only. Reflow has no accounts and no
+# authentication: keeping it on the loopback interface means only this machine
+# can reach it. Put it behind an authenticating proxy before exposing it.
+services:
+  reflow:
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-dev}
+    image: reflow:latest
+    container_name: reflow
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+    # Size and shape of the work. A big book is CPU-bound and holds a PDFium
+    # instance for the length of the conversion, so two jobs is a sane default
+    # on a laptop; raise it only if you have the cores.
+    command:
+      - serve
+      - -addr
+      - 0.0.0.0:8080
+      - -jobs
+      - "2"
+    # Uncomment to raise the upload limit (default is the ingest limit, 200 MB).
+    # - -max-mb
+    # - "400"
+    # Uncomment to turn OCR or EPUBCheck off; both are on by default.
+    # - -ocr=false
+    # - -validate=false
