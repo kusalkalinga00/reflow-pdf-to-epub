@@ -1,0 +1,35 @@
+version: 2
+
+updates:
+  # Go modules: PDFium bindings and pdfcpu are the two with real parsers in
+  # them, so a security fix there matters more than a feature bump.
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    labels: ["dependencies"]
+
+  # Workflows are pinned to commit SHAs; Dependabot is how those pins move.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: ["dependencies", "ci"]
+
+  # The image installs Debian packages (Tesseract, the JRE) at build time.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels: ["dependencies", "docker"]
