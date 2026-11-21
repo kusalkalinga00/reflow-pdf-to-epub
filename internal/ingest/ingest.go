@@ -18,6 +18,16 @@ import (
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 )
 
+func init() {
+	// pdfcpu loads its configuration from the user's config directory and
+	// writes a default one when it is missing. Neither is wanted here: the
+	// filesystem may be read-only (a hardened container), and reading a
+	// per-machine config would make a conversion depend on the operator's home
+	// directory. "disable" selects the stateless configuration, which needs no
+	// disk and behaves the same everywhere.
+	model.ConfigPath = "disable"
+}
+
 // Sentinel errors. Callers branch on these with errors.Is; the wrapped detail
 // is for humans and logs.
 var (
@@ -152,6 +162,8 @@ func CheckWithPassword(ctx context.Context, src io.ReaderAt, size int64, limits 
 
 // CheckFile is Check for a path on disk.
 func CheckFile(ctx context.Context, name string, limits Limits) (Info, error) {
+	// #nosec G304 -- name is the file the caller asked to convert (a CLI
+	// argument or a caller-supplied path), not a value from a request body.
 	f, err := os.Open(name)
 	if err != nil {
 		return Info{}, err
