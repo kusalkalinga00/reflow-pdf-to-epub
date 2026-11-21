@@ -260,7 +260,18 @@ func (s *Server) handleJobStart(w http.ResponseWriter, r *http.Request) {
 }
 
 // runJob waits for a conversion slot, converts, and records the outcome.
+//
+// A panic here would be fatal to the process: this is a goroutine of its own,
+// and net/http only recovers panics on the handler goroutine. A PDF that makes
+// a parser library panic must fail one job, not take the server down with every
+// other job in flight, so the conversion is guarded.
 func (s *Server) runJob(j *job) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			j.fail(fmt.Errorf("conversion crashed: %v", recovered))
+		}
+	}()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	j.mu.Lock()
 	j.cancel = cancel
@@ -361,7 +372,10 @@ func (s *Server) handleJobCancel(w http.ResponseWriter, r *http.Request) {
 // It writes the error response itself and returns ok=false when the request
 // cannot be converted.
 func (s *Server) readUpload(w http.ResponseWriter, r *http.Request) (multipart.File, *multipart.FileHeader, string, bool) {
+	// The body is capped here before parsing; 8 MiB is only the threshold above
+	// which parts spill to disk, so the memory ceiling is s.maxUpload.
 	r.Body = http.MaxBytesReader(w, r.Body, s.maxUpload)
+	// #nosec G120 -- bounded by MaxBytesReader above.
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {

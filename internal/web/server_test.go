@@ -694,3 +694,53 @@ func TestSecurityHeadersBlockFramingAndSniffing(t *testing.T) {
 		t.Errorf("CSP = %q, want frame-ancestors 'none'", csp)
 	}
 }
+
+// panickingConverter is a converter that fails the way a parser library can:
+// with a panic rather than an error.
+type panickingConverter struct{}
+
+func (panickingConverter) Run(context.Context, io.ReaderAt, int64, convert.DocOptions) (convert.Result, error) {
+	panic("parser exploded")
+}
+
+func TestAPanickingConversionDoesNotTakeTheServerDown(t *testing.T) {
+	srv := httptest.NewServer(web.New(panickingConverter{}, web.Options{}).Handler())
+	t.Cleanup(srv.Close)
+
+	body, contentType := uploadBody(t, "book.pdf", []byte("%PDF-1.4\n%%EOF\n"))
+	res, err := srv.Client().Post(srv.URL+"/api/jobs", contentType, body)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusAccepted {
+		t.Fatalf("post = %d, want 202", res.StatusCode)
+	}
+
+	var started struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&started); err != nil {
+		t.Fatalf("decode job: %v", err)
+	}
+
+	// The panic happens inside the job goroutine. The job must end in an error
+	// state, and the server must keep answering.
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		status, err := srv.Client().Get(srv.URL + "/api/jobs/" + started.ID)
+		if err != nil {
+			t.Fatalf("the server stopped answering after a panic: %v", err)
+		}
+		var state struct {
+			State string `json:"state"`
+		}
+		_ = json.NewDecoder(status.Body).Decode(&state)
+		status.Body.Close()
+		if state.State == "error" {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("the panicking job never reported an error")
+}
