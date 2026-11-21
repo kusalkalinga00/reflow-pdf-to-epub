@@ -4,7 +4,7 @@
 
 | | |
 |---|---|
-| **Repository** | `tool-factory-epub-converter` |
+| **Repository** | `reflow` |
 | **Working title** | Reflow |
 | **Status** | Draft for review |
 | **Date** | 14 November 2026 |

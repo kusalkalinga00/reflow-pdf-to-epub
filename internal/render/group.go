@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/normalize"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/idm"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/normalize"
 )
 
 // Paragraph is a run of consecutive line blocks that belong together.

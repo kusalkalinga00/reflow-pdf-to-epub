@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/idm"
 )
 
 func TestExtractPrintsSummary(t *testing.T) {

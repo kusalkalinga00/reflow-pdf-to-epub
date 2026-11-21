@@ -5,7 +5,7 @@ import (
 
 	"github.com/klippa-app/go-pdfium/responses"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/idm"
 )
 
 func char(text string, left, bottom, right, top float64) *responses.GetPageTextStructuredChar {

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/epub"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/extract"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/render"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/testpdf"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/epub"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/extract"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/render"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/testpdf"
 )
 
 // TestPipelineFindsChapters runs extraction and rendering together on a PDF

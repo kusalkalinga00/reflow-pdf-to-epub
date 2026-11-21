@@ -21,9 +21,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ingest"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/render"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/convert"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/ingest"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/render"
 )
 
 //go:embed static

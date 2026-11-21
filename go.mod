@@ -1,4 +1,4 @@
-module github.com/kusalkalinga00/tool-factory-epub-convertor
+module github.com/kusalkalinga00/reflow-pdf-to-epub
 
 go 1.27.1
 

@@ -13,7 +13,7 @@ import (
 
 	"golang.org/x/text/unicode/norm"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/idm"
 )
 
 // Apply returns a copy of doc with every block's text normalized.

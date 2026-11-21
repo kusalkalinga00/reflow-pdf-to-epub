@@ -5,9 +5,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ocr"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/testpdf"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/idm"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/ocr"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/testpdf"
 )
 
 // fakeRecognizer stands in for Tesseract so the wiring and the coordinate

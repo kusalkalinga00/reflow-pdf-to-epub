@@ -17,9 +17,9 @@ import (
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/extract"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/testpdf"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/extract"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/idm"
+	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/testpdf"
 )
 
 func newExtractor(t *testing.T, opts extract.Options) *extract.PDFium {
