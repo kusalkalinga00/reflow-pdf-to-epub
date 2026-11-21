@@ -630,3 +630,67 @@ func TestJobAsksForAPasswordAndSaysWhenItIsWrong(t *testing.T) {
 		t.Errorf("message with a password = %q, want it to say the password was wrong", state.Error)
 	}
 }
+
+func TestBasicAuthGatesEverythingButHealth(t *testing.T) {
+	srv := newServer(t, web.Options{Username: "reader", Password: "correct horse"})
+
+	do := func(path string, user, pass string) *http.Response {
+		req, err := http.NewRequest(http.MethodGet, srv.URL+path, nil)
+		if err != nil {
+			t.Fatalf("request: %v", err)
+		}
+		if user != "" || pass != "" {
+			req.SetBasicAuth(user, pass)
+		}
+		res, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatalf("get %s: %v", path, err)
+		}
+		return res
+	}
+
+	if res := do("/healthz", "", ""); res.StatusCode != http.StatusOK {
+		t.Errorf("healthz without credentials = %d, want 200", res.StatusCode)
+	}
+
+	res := do("/", "", "")
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("index without credentials = %d, want 401", res.StatusCode)
+	}
+	if got := res.Header.Get("WWW-Authenticate"); !strings.Contains(got, "Basic") {
+		t.Errorf("WWW-Authenticate = %q", got)
+	}
+
+	if res := do("/", "reader", "wrong"); res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("index with a wrong password = %d, want 401", res.StatusCode)
+	}
+
+	if res := do("/", "reader", "correct horse"); res.StatusCode != http.StatusOK {
+		t.Errorf("index with the right password = %d, want 200", res.StatusCode)
+	}
+}
+
+func TestSecurityHeadersBlockFramingAndSniffing(t *testing.T) {
+	srv := newServer(t, web.Options{})
+	res, err := http.Get(srv.URL + "/")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer res.Body.Close()
+
+	want := map[string]string{
+		"X-Content-Type-Options":       "nosniff",
+		"X-Frame-Options":              "DENY",
+		"Referrer-Policy":              "no-referrer",
+		"Cross-Origin-Opener-Policy":   "same-origin",
+		"Cross-Origin-Resource-Policy": "same-origin",
+	}
+	for header, value := range want {
+		if got := res.Header.Get(header); got != value {
+			t.Errorf("%s = %q, want %q", header, got, value)
+		}
+	}
+	if csp := res.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'none'") {
+		t.Errorf("CSP = %q, want frame-ancestors 'none'", csp)
+	}
+}
