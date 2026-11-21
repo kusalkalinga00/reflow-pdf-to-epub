@@ -3,6 +3,7 @@ package corpus
 import (
 	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/render"
 	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/testpdf"
+	"strconv"
 )
 
 func line(text string, size, x, y float64) testpdf.Line {
@@ -128,9 +129,9 @@ func scanned() Case {
 }
 
 func bodyForPage(n int) string {
-	return "Body of page " + string(rune('0'+n)) + "."
+	return "Body of page " + strconv.Itoa(n) + "."
 }
 
 func footerForPage(n int) string {
-	return string(rune('0' + n))
+	return strconv.Itoa(n)
 }

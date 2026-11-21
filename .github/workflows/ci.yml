@@ -53,6 +53,12 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # High-severity gosec only: the lower tiers are dominated by unchecked
+      # error writes to HTTP responses, which is noise here. The rules that can
+      # bite (command injection, path traversal, integer overflow) are high.
+      - name: gosec
+        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.30.0 -severity high -confidence high ./...
+
       - name: Test
         run: go test -race -count=1 ./...
 
@@ -73,10 +79,20 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # govulncheck loads the real build graph, and that graph contains cgo.
+      # Without PDFium it fails to load go-pdfium instead of analysing it.
+      - name: Install PDFium
+        run: |
+          ./scripts/pdfium.sh
+          echo "PKG_CONFIG_PATH=$PWD/.pdfium/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$PWD/.pdfium/lib" >> "$GITHUB_ENV"
+
       # govulncheck is the Go team's database of reachable vulnerabilities:
       # it reports a CVE only when the vulnerable code is actually called.
+      # v1.10.0 is the first line that understands Go 1.27's syntax tree;
+      # v1.1.4 panics on composite literals it has no case for.
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.1.4 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 
   docker:
     name: container image

@@ -32,6 +32,8 @@ func ReferenceText(path string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
+	// #nosec G204 G702 -- binary is resolved from PATH and path is a corpus
+	// file the operator placed there; this never runs in the server.
 	out, err := exec.CommandContext(ctx, binary, "-enc", "UTF-8", "-q", path, "-").Output()
 	if err != nil {
 		return "", fmt.Errorf("pdftotext %s: %w", path, err)

@@ -17,6 +17,15 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     restart: unless-stopped
+    # The container only needs temporary space: uploads are converted in
+    # memory, and Tesseract and the JVM write scratch files to /tmp.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=1g
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     # Size and shape of the work. A big book is CPU-bound and holds a PDFium
     # instance for the length of the conversion, so two jobs is a sane default
     # on a laptop; raise it only if you have the cores.
