@@ -6,7 +6,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/version"
+	"github.com/kusalkalinga00/reflow/internal/version"
 )
 
 // Exit codes are part of the CLI contract: scripts branch on them.

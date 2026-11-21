@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/render"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/score"
+	"github.com/kusalkalinga00/reflow/internal/idm"
+	"github.com/kusalkalinga00/reflow/internal/render"
+	"github.com/kusalkalinga00/reflow/internal/score"
 )
 
 func document(pages int, coverage float64, blocks ...idm.Block) idm.Document {

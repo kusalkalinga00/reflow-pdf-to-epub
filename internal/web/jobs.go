@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/score"
+	"github.com/kusalkalinga00/reflow/internal/convert"
+	"github.com/kusalkalinga00/reflow/internal/score"
 )
 
 // A job is one conversion that outlives its HTTP request.

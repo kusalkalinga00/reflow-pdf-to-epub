@@ -16,11 +16,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ingest"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/score"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/testpdf"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/web"
+	"github.com/kusalkalinga00/reflow/internal/convert"
+	"github.com/kusalkalinga00/reflow/internal/ingest"
+	"github.com/kusalkalinga00/reflow/internal/score"
+	"github.com/kusalkalinga00/reflow/internal/testpdf"
+	"github.com/kusalkalinga00/reflow/internal/web"
 )
 
 func newServer(t *testing.T, opts web.Options) *httptest.Server {

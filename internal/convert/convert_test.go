@@ -15,10 +15,10 @@ import (
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ingest"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/score"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/testpdf"
+	"github.com/kusalkalinga00/reflow/internal/convert"
+	"github.com/kusalkalinga00/reflow/internal/ingest"
+	"github.com/kusalkalinga00/reflow/internal/score"
+	"github.com/kusalkalinga00/reflow/internal/testpdf"
 )
 
 func simplePDF() []byte {

@@ -1,8 +1,8 @@
 package corpus
 
 import (
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/render"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/testpdf"
+	"github.com/kusalkalinga00/reflow/internal/render"
+	"github.com/kusalkalinga00/reflow/internal/testpdf"
 )
 
 func line(text string, size, x, y float64) testpdf.Line {

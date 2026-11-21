@@ -9,7 +9,7 @@ import (
 
 // Set at link time:
 //
-//	go build -ldflags "-X github.com/kusalkalinga00/tool-factory-epub-convertor/internal/version.Version=v0.1.0"
+//	go build -ldflags "-X github.com/kusalkalinga00/reflow/internal/version.Version=v0.1.0"
 //
 // Commit and BuildDate are optional; when Commit is empty the revision is read
 // from the embedded build info, which Go fills in for builds from a git tree.

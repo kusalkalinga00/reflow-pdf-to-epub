@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ingest"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/testpdf"
+	"github.com/kusalkalinga00/reflow/internal/ingest"
+	"github.com/kusalkalinga00/reflow/internal/testpdf"
 )
 
 func writePDF(t *testing.T, pages int) string {

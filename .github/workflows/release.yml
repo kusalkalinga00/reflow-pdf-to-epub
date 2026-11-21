@@ -11,7 +11,7 @@ permissions:
   packages: write
 
 env:
-  MODULE: github.com/kusalkalinga00/tool-factory-epub-convertor
+  MODULE: github.com/kusalkalinga00/reflow
 
 jobs:
   binaries:

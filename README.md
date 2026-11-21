@@ -306,8 +306,8 @@ them, which is the shortest path from a clone to a working book.
 ### Docker (recommended)
 
 ```sh
-git clone https://github.com/kusalkalinga00/tool-factory-epub-convertor.git
-cd tool-factory-epub-convertor
+git clone https://github.com/kusalkalinga00/reflow.git
+cd reflow
 docker compose up -d --build
 ```
 
@@ -319,7 +319,7 @@ skip the build entirely:
 
 ```sh
 docker run --rm -p 127.0.0.1:8080:8080 \
-  ghcr.io/kusalkalinga00/tool-factory-epub-convertor:latest
+  ghcr.io/kusalkalinga00/reflow:latest
 ```
 
 The image is about 650 MB: PDFium, Tesseract and a headless JRE. OCR is English

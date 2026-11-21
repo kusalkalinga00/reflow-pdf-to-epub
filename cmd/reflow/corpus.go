@@ -7,7 +7,7 @@ import (
 	"io"
 	"text/tabwriter"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/corpus"
+	"github.com/kusalkalinga00/reflow/internal/corpus"
 )
 
 // corpusCmd runs the quality corpus: the built-in synthetic cases, or a

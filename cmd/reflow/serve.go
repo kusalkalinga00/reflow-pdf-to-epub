@@ -13,11 +13,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ingest"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ocr"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/validate"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/web"
+	"github.com/kusalkalinga00/reflow/internal/convert"
+	"github.com/kusalkalinga00/reflow/internal/ingest"
+	"github.com/kusalkalinga00/reflow/internal/ocr"
+	"github.com/kusalkalinga00/reflow/internal/validate"
+	"github.com/kusalkalinga00/reflow/internal/web"
 )
 
 func serveCmd(args []string, stdout, stderr io.Writer) int {

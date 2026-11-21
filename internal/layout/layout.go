@@ -21,7 +21,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
+	"github.com/kusalkalinga00/reflow/internal/idm"
 )
 
 // Apply returns a copy of doc with blocks in reading order and page furniture

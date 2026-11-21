@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/epub"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
+	"github.com/kusalkalinga00/reflow/internal/epub"
+	"github.com/kusalkalinga00/reflow/internal/idm"
 )
 
 // PageImage is one rasterised page of a page-image book.

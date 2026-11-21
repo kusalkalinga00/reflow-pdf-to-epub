@@ -11,9 +11,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/convert"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/ocr"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/validate"
+	"github.com/kusalkalinga00/reflow/internal/convert"
+	"github.com/kusalkalinga00/reflow/internal/ocr"
+	"github.com/kusalkalinga00/reflow/internal/validate"
 )
 
 func convertCmd(args []string, stdout, stderr io.Writer) int {

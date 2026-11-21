@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
+	"github.com/kusalkalinga00/reflow/internal/idm"
 )
 
 // Footnote detection thresholds.

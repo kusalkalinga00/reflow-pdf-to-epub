@@ -1,7 +1,7 @@
 .PHONY: all build test vet fmt fmt-check tidy check run clean deps docker
 
 BIN := reflow
-PKG := github.com/kusalkalinga00/tool-factory-epub-convertor
+PKG := github.com/kusalkalinga00/reflow
 
 # PDFium is discovered through pkg-config; scripts/pdfium.sh installs it into
 # $(PDFIUM_DIR) and writes the .pc file that points at it.

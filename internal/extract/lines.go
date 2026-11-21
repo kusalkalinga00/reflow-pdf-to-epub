@@ -7,7 +7,7 @@ import (
 
 	"github.com/klippa-app/go-pdfium/responses"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
+	"github.com/kusalkalinga00/reflow/internal/idm"
 )
 
 // line is one visual line of text after assembling its characters.

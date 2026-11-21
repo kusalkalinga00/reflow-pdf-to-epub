@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/epub"
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/validate"
+	"github.com/kusalkalinga00/reflow/internal/epub"
+	"github.com/kusalkalinga00/reflow/internal/validate"
 )
 
 func newValidator(t *testing.T) *validate.EpubCheck {

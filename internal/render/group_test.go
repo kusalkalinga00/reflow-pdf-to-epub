@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kusalkalinga00/tool-factory-epub-convertor/internal/idm"
+	"github.com/kusalkalinga00/reflow/internal/idm"
 )
 
 func line(text string, page int, y0, y1, size float64) idm.Block {
