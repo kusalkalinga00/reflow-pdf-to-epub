@@ -349,8 +349,11 @@ A common shape is Caddy or nginx on the same host: it terminates TLS, demands a
 login, and proxies to `127.0.0.1:8080`. In compose terms, bind Reflow to the
 loopback interface and let the proxy own the public port.
 
-`reflow serve` warns on startup whenever it binds to anything other than a
-loopback address, which is why the compose logs show that line. Inside the
+The compose file also runs the container with a read-only root filesystem, no
+Linux capabilities, and `no-new-privileges`; only `/tmp` is writable, which is
+all Tesseract and the JVM need. `reflow serve` warns on startup whenever it binds
+to anything other than a loopback address, which is why the compose logs show
+that line. Inside the
 container `0.0.0.0` is correct; the protection comes from publishing the port
 on `127.0.0.1` only.
 
