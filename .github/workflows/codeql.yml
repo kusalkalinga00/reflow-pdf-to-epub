@@ -18,6 +18,9 @@ permissions:
 jobs:
   analyze:
     name: analyze (go)
+    # Code scanning needs GitHub Advanced Security while the repository is
+    # private. The job starts running by itself once the repository is public.
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
