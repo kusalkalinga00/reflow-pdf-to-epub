@@ -63,8 +63,10 @@ ENV EPUBCHECK_JAR=/opt/epubcheck/epubcheck.jar
 
 COPY --from=build /out/reflow /usr/local/bin/reflow
 
-# MIT requires the notice to travel with copies of the software.
-COPY LICENSE /usr/share/doc/reflow/LICENSE
+# Apache-2.0 requires the licence and NOTICE to travel with copies of the
+# software, and the bundled PDFium builds carry their own licence set.
+COPY LICENSE NOTICE THIRD_PARTY.md /usr/share/doc/reflow/
+COPY --from=build /src/.pdfium/licenses /usr/share/doc/reflow/pdfium
 
 RUN useradd --system --uid 10001 --home-dir /home/reflow --create-home reflow
 USER reflow
