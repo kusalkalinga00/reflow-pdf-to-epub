@@ -75,6 +75,9 @@ type EpubCheck struct {
 // on PATH is accepted too, which is what a system package installs.
 func NewEpubCheck() (*EpubCheck, error) {
 	if jar := os.Getenv("EPUBCHECK_JAR"); jar != "" {
+		// #nosec G703 -- the path is operator configuration from the
+		// environment, not request data; stat is only a presence check before
+		// passing it to the JVM.
 		if _, err := os.Stat(jar); err != nil {
 			return nil, fmt.Errorf("%w: %s", ErrUnavailable, jar)
 		}
@@ -103,6 +106,9 @@ func NewEpubCheck() (*EpubCheck, error) {
 // from stdout regardless of the exit status.
 func (c *EpubCheck) Check(ctx context.Context, path string) (Report, error) {
 	args := append(append([]string{}, c.args...), "-j", "-", path)
+	// #nosec G204 -- c.name is "java" or a resolved epubcheck binary, c.args a
+	// jar path from the environment, and path is a temporary file this process
+	// wrote and validated. Nothing here comes from a request body.
 	out, err := exec.CommandContext(ctx, c.name, args...).Output()
 	if err != nil {
 		var exitErr *exec.ExitError

@@ -83,7 +83,7 @@ Without -json, a summary is printed instead.
 		return exitOK
 	}
 
-	if err := os.WriteFile(*outPath, data, 0o644); err != nil {
+	if err := os.WriteFile(*outPath, data, 0o600); err != nil {
 		fmt.Fprintln(stderr, "reflow:", err)
 		return exitFailure
 	}
@@ -98,6 +98,7 @@ func runExtraction(ctx context.Context, path string) (idm.Document, error) {
 	}
 	defer converter.Close()
 
+	// #nosec G304 -- path is the file the user asked to inspect.
 	f, err := os.Open(path)
 	if err != nil {
 		return idm.Document{}, err

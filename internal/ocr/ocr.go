@@ -70,6 +70,8 @@ func (t *Tesseract) Recognize(ctx context.Context, png []byte) ([]Line, error) {
 		language = "eng"
 	}
 
+	// #nosec G204 -- the binary comes from configuration and the page arrives
+	// on stdin, so no path or text reaches the argument vector.
 	cmd := exec.CommandContext(ctx, binary, "stdin", "stdout", "-l", language, "--psm", "3", "tsv")
 	cmd.Stdin = bytes.NewReader(png)
 

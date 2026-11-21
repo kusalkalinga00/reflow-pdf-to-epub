@@ -56,6 +56,7 @@ document you can already read; it is used for this run only.
 		}
 	}
 
+	// #nosec G304 -- path is the file the user asked to convert.
 	f, err := os.Open(path)
 	if err != nil {
 		fmt.Fprintln(stderr, "reflow:", err)
@@ -132,12 +133,14 @@ func writeFileAtomic(dest string, data []byte) error {
 	defer os.Remove(tmp.Name())
 
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		// The write error is the useful one; a close error on a file that is
+		// about to be removed adds nothing.
+		_ = tmp.Close() //nolint:errcheck // see above
 		return err
 	}
 	// CreateTemp uses 0600; an ebook should be readable like any other file.
 	if err := tmp.Chmod(0o644); err != nil {
-		tmp.Close()
+		_ = tmp.Close() //nolint:errcheck // the chmod error is the one to keep
 		return err
 	}
 	if err := tmp.Close(); err != nil {

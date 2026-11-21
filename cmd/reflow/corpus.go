@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"text/tabwriter"
 
 	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/corpus"
@@ -103,5 +104,7 @@ func printResults(w io.Writer, results []corpus.Result) {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n",
 			r.Name, recall, wer, order, len(r.ChapterTitles), result)
 	}
-	tw.Flush()
+	if err := tw.Flush(); err != nil {
+		fmt.Fprintln(os.Stderr, "reflow: writing the report:", err)
+	}
 }

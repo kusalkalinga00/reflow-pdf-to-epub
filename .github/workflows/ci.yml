@@ -53,6 +53,12 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # High-severity gosec only: the lower tiers are dominated by unchecked
+      # error writes to HTTP responses, which is noise here. The rules that can
+      # bite (command injection, path traversal, integer overflow) are high.
+      - name: gosec
+        run: go run github.com/securego/gosec/v2/cmd/gosec@v2.30.0 -severity high -confidence high ./...
+
       - name: Test
         run: go test -race -count=1 ./...
 

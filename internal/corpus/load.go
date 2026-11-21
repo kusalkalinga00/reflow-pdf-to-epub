@@ -61,12 +61,15 @@ func LoadDir(dir string, opts LoadOptions) ([]Case, error) {
 		}
 
 		base := strings.TrimSuffix(entry.Name(), ".pdf")
+		// #nosec G304 -- the directory is a CLI argument and the name comes
+		// from its own listing.
 		pdf, err := os.ReadFile(filepath.Join(dir, entry.Name()))
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", entry.Name(), err)
 		}
 
 		wantPath := filepath.Join(dir, base+".txt")
+		// #nosec G304 -- same directory, same listing-derived name.
 		want, err := os.ReadFile(wantPath)
 		if err != nil {
 			switch {
@@ -108,6 +111,7 @@ func LoadDir(dir string, opts LoadOptions) ([]Case, error) {
 // on the defaults; a malformed one is an error, because silently ignoring it
 // would judge the document by rules nobody chose.
 func (c *Case) loadExpectations(path string) error {
+	// #nosec G304 -- the sidecar sits beside a corpus case the operator placed.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
