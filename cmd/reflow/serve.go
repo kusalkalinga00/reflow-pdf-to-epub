@@ -80,6 +80,10 @@ meant to be exposed to a network.
 		Concurrency: converters.Size(),
 	})
 
+	if !loopbackAddr(*addr) {
+		fmt.Fprintf(stderr, "reflow: warning: %s is reachable from the network and Reflow has no authentication; put it behind a proxy\n", *addr)
+	}
+
 	httpServer := &http.Server{
 		Addr:    *addr,
 		Handler: server.Handler(),
@@ -117,4 +121,18 @@ meant to be exposed to a network.
 
 	fmt.Fprintln(stdout, "stopped")
 	return exitOK
+}
+
+// loopbackAddr reports whether an address only accepts local connections.
+// Reflow has no authentication, so binding elsewhere deserves a warning.
+func loopbackAddr(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
