@@ -37,6 +37,7 @@ type Paragraph struct {
 // stage will replace this with a rule that uses position and surrounding
 // context as well; until then, a conservative rule beats no structure at all.
 func GroupParagraphs(blocks []idm.Block) []Paragraph {
+	pitch := pagePitch(blocks)
 	var out []Paragraph
 
 	for _, b := range blocks {
@@ -61,13 +62,17 @@ func GroupParagraphs(blocks []idm.Block) []Paragraph {
 			continue
 		}
 
-		if n := len(out); n > 0 && shouldMerge(out[n-1], b) {
+		if n := len(out); n > 0 && shouldMerge(out[n-1], b, pitch[b.Page]) {
 			out[n-1] = merge(out[n-1], b)
 			continue
 		}
 
+		kind := b.Kind
+		if kind != idm.KindList {
+			kind = idm.KindParagraph
+		}
 		out = append(out, Paragraph{
-			Kind:     idm.KindParagraph,
+			Kind:     kind,
 			Text:     strings.TrimSpace(b.Text),
 			Page:     b.Page,
 			Box:      b.BBox,
@@ -81,7 +86,56 @@ func GroupParagraphs(blocks []idm.Block) []Paragraph {
 }
 
 // shouldMerge reports whether next continues the paragraph that prev ends.
-func shouldMerge(prev Paragraph, next idm.Block) bool {
+// pagePitch is the typical baseline distance between consecutive lines on a
+// page.
+//
+// Merging on the ink gap between boxes is fragile: a line with no descender is
+// 2-3 points shorter than the one above it, which is the same difference a
+// paragraph break makes. The baseline distance is constant for a page, so a
+// paragraph break is a *departure* from it rather than an absolute number.
+func pagePitch(blocks []idm.Block) map[int]float64 {
+	samples := make(map[int][]float64, 32)
+	byPage := make(map[int]idm.Block, 32)
+
+	for _, b := range blocks {
+		if b.Kind != idm.KindParagraph || b.Text == "" {
+			continue
+		}
+		prev, ok := byPage[b.Page]
+		byPage[b.Page] = b
+		if !ok {
+			continue
+		}
+
+		delta := prev.BBox.Y0 - b.BBox.Y0
+		lineHeight := math.Max(prev.FontSize, b.FontSize)
+		if delta <= 0 || lineHeight <= 0 || delta > 3*lineHeight {
+			continue
+		}
+		samples[b.Page] = append(samples[b.Page], delta)
+	}
+
+	out := make(map[int]float64, len(samples))
+	for page, values := range samples {
+		if len(values) < 3 {
+			continue
+		}
+		out[page] = medianFloat(values)
+	}
+	return out
+}
+
+func medianFloat(values []float64) float64 {
+	sorted := append([]float64(nil), values...)
+	sort.Float64s(sorted)
+	mid := len(sorted) / 2
+	if len(sorted)%2 == 1 {
+		return sorted[mid]
+	}
+	return (sorted[mid-1] + sorted[mid]) / 2
+}
+
+func shouldMerge(prev Paragraph, next idm.Block, pitchLimit float64) bool {
 	if prev.Kind != idm.KindParagraph || next.Kind != idm.KindParagraph || prev.Page != next.Page {
 		return false
 	}
@@ -94,17 +148,33 @@ func shouldMerge(prev Paragraph, next idm.Block) bool {
 		return false
 	}
 
-	// Positive gap means next sits below prev. Overlap or reordering is not a
-	// continuation.
-	gap := prev.Box.Y0 - next.BBox.Y1
 	lineHeight := math.Max(prev.FontSize, next.FontSize)
-	if gap < -0.5*lineHeight {
+
+	// Next must start no further right than the previous line ends, or the two
+	// are side by side on the same baseline: a title and its right-aligned
+	// date, or two columns that share a band.
+	if next.BBox.X0 >= prev.Box.X1 {
 		return false
 	}
 
-	// Normal leading leaves a gap well under one em; a paragraph break adds
-	// roughly a line, so the threshold separates the two cases.
-	return gap <= 0.75*lineHeight
+	// Positive pitch means next sits below prev. Overlap or reordering is not a
+	// continuation.
+	pitch := prev.Box.Y0 - next.BBox.Y0
+	if pitch < -0.5*lineHeight {
+		return false
+	}
+
+	// A page has one leading; a paragraph break adds to it. 1.3 leaves room
+	// for a page whose lines are set on a slightly uneven grid.
+	limit := 2.2 * lineHeight
+	if pitchLimit > 0 && 1.3*pitchLimit > limit {
+		limit = 1.3 * pitchLimit
+	}
+
+	// The second bound matters on pages that mix sizes: a slide's wrapped
+	// heading is set far looser than the code beneath it, and judging it by
+	// the page's median pitch would cut the heading into one chapter per word.
+	return pitch <= limit
 }
 
 func merge(prev Paragraph, next idm.Block) Paragraph {
