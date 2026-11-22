@@ -623,7 +623,7 @@ func clampInt(v, lo, hi int) int {
 // a running header or footer can live. Five percent is a header at 95% of the
 // page; anything further in is body text, and treating it as furniture silently
 // deletes content.
-const furnitureZone = 0.94
+const furnitureZone = 0.90
 
 // markFurniture flags running headers and footers in place.
 //

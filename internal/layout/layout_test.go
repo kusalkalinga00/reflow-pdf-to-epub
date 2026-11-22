@@ -599,4 +599,28 @@ func TestContentsRowJoinsAcrossAWideLeaderGap(t *testing.T) {
 		}
 	}
 	t.Fatalf("row was not joined: %v", texts(out.Blocks))
+
+}
+
+func TestFoliosBelowTheSixPercentBandAreRemoved(t *testing.T) {
+	// Alice prints its page numbers at y≈41 of 595 — 7% from the bottom edge —
+	// while body text starts around y≈79. A six-percent band misses them, and
+	// they end up as lone numbers inside paragraphs.
+	pageHeight := 595.0
+	var blocks []idm.Block
+	for p := 1; p <= 6; p++ {
+		blocks = append(blocks,
+			block("Running head", p, 200, pageHeight-35, 380, pageHeight-25),
+			block("Body text on this page.", p, 72, 300, 520, 312),
+			block(string(rune('0'+p)), p, 207, 41.3, 213, 51.7),
+		)
+	}
+
+	out := Apply(document(6, blocks...))
+
+	for _, b := range out.Blocks {
+		if len(b.Text) == 1 && b.Text[0] >= '1' && b.Text[0] <= '9' && !b.Kind.IsFurniture() {
+			t.Errorf("folio %q at 7%% survived", b.Text)
+		}
+	}
 }
