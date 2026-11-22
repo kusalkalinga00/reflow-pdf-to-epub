@@ -209,3 +209,64 @@ func TestGroupParagraphsSkipsBlankText(t *testing.T) {
 		t.Fatalf("got %v", texts(paras))
 	}
 }
+
+func TestLinesWithUnevenInkHeightStillFormOneParagraph(t *testing.T) {
+	// The ink box of a line depends on whether it happens to contain ascenders
+	// or descenders, so the gap to the next line varies by a few points even
+	// when the leading is constant. Merging on that gap splits mid-sentence.
+	blocks := []idm.Block{
+		line("The first line of the paragraph", 1, 700, 710, 10),
+		line("the second, set with no descenders at all", 1, 680, 688, 10),
+		line("the third line with a descender in it", 1, 660, 672, 10),
+		line("and the fourth line closing the paragraph.", 1, 640, 650, 10),
+		line("A new paragraph starts here.", 1, 600, 610, 10),
+	}
+
+	paras := GroupParagraphs(blocks)
+	if len(paras) != 2 {
+		t.Fatalf("paragraphs = %d, want 2: %+v", len(paras), paras)
+	}
+	if !strings.Contains(paras[0].Text, "no descenders") {
+		t.Errorf("first paragraph = %q", paras[0].Text)
+	}
+}
+
+func TestSideBySideBlocksDoNotMerge(t *testing.T) {
+	// A job title and its right-aligned date share a baseline. They are not
+	// consecutive lines, and joining them reorders the reader's text.
+	title := idm.Block{
+		Kind: idm.KindParagraph, Text: "Software Engineer", Page: 1,
+		BBox: idm.Rect{X0: 72, Y0: 700, X1: 220, Y1: 710}, FontSize: 10,
+	}
+	date := idm.Block{
+		Kind: idm.KindParagraph, Text: "Jun 2026 - Present", Page: 1,
+		BBox: idm.Rect{X0: 400, Y0: 700, X1: 520, Y1: 710}, FontSize: 10,
+	}
+
+	paras := GroupParagraphs([]idm.Block{title, date})
+	if len(paras) != 2 {
+		t.Fatalf("paragraphs = %d, want 2: %+v", len(paras), paras)
+	}
+}
+
+func TestWrappedHeadingMergesOnAPageOfSmallerText(t *testing.T) {
+	// A slide's heading is set much looser than its body; judging it by the
+	// page's median leading cut one heading into a chapter per word.
+	blocks := []idm.Block{
+		{Kind: idm.KindParagraph, Text: "Ingress with", Page: 1,
+			BBox: idm.Rect{X0: 72, Y0: 700, X1: 300, Y1: 730}, FontSize: 30},
+		{Kind: idm.KindParagraph, Text: "Multiple", Page: 1,
+			BBox: idm.Rect{X0: 72, Y0: 664, X1: 240, Y1: 694}, FontSize: 30},
+		{Kind: idm.KindParagraph, Text: "Services", Page: 1,
+			BBox: idm.Rect{X0: 72, Y0: 628, X1: 220, Y1: 658}, FontSize: 30},
+		line("code line one", 1, 560, 568, 10),
+		line("code line two", 1, 548, 556, 10),
+		line("code line three", 1, 536, 544, 10),
+		line("code line four", 1, 524, 532, 10),
+	}
+
+	paras := GroupParagraphs(blocks)
+	if len(paras) == 0 || paras[0].Text != "Ingress with Multiple Services" {
+		t.Fatalf("heading paragraphs = %+v", paras)
+	}
+}

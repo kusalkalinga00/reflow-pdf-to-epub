@@ -218,9 +218,15 @@ func JoinLines(a, b string) string {
 	first, _ := utf8.DecodeRuneInString(b)
 
 	switch {
-	case isHyphen(last) && unicode.IsLower(first):
+	case isHyphen(last) && unicode.IsLower(first) && hyphenInsideWord(a):
 		// "exam-" + "ple" is one word.
 		return a[:len(a)-len(string(last))] + b
+
+	case isHyphen(last) && !hyphenInsideWord(a):
+		// "Jun 2026 -" + "Present" is a separator dash, not a broken word:
+		// the space before the hyphen gives it away, and dropping it glues
+		// two words that belong apart.
+		return a + " " + b
 
 	case isHyphen(last):
 		// "Anglo-" + "Saxon" keeps its hyphen but loses the line break.
@@ -235,6 +241,17 @@ func JoinLines(a, b string) string {
 	}
 
 	return a + " " + b
+}
+
+// hyphenInsideWord reports whether the line's final hyphen follows a letter,
+// which is what a word break looks like. "Anglo-" and "exam-" do; "2026 -" and
+// a standalone "-" do not.
+func hyphenInsideWord(s string) bool {
+	runes := []rune(strings.TrimRight(s, " \t"))
+	if len(runes) < 2 {
+		return false
+	}
+	return unicode.IsLetter(runes[len(runes)-2]) || unicode.IsDigit(runes[len(runes)-2])
 }
 
 func isHyphen(r rune) bool {

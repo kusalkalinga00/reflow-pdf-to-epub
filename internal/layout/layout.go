@@ -35,6 +35,13 @@ func Apply(doc idm.Document) idm.Document {
 		byPage[b.Page-1] = append(byPage[b.Page-1], b)
 	}
 
+	// Dot leaders arrive as separate text runs, one per dot. Joining them
+	// before anything else keeps a table of contents a table of contents
+	// instead of one paragraph per dot.
+	for i := range byPage {
+		byPage[i] = joinLeaderRuns(byPage[i])
+	}
+
 	markFurniture(byPage, doc.Pages)
 
 	for i := range byPage {
@@ -47,6 +54,118 @@ func Apply(doc idm.Document) idm.Document {
 	}
 
 	return doc.WithBlocks(blocks)
+}
+
+// joinLeaderRuns rebuilds table-of-contents lines.
+//
+// A TOC row is text, then a run of dots set as one text object per dot, then a
+// page number. PDFium reports each as its own block, so without this a table of
+// contents becomes one paragraph per dot. The page is recognised by having at
+// least two leader runs; on those pages, blocks that share a baseline and sit
+// close together are one line.
+func joinLeaderRuns(blocks []idm.Block) []idm.Block {
+	leaders := 0
+	for _, b := range blocks {
+		if leaderOnly(b.Text) {
+			leaders++
+		}
+	}
+	if leaders < 2 {
+		return blocks
+	}
+
+	// Pieces of a row can arrive interleaved with the next row's dots, so
+	// group by baseline before joining. orderPage re-sorts afterwards.
+	sorted := append([]idm.Block(nil), blocks...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if math.Abs(sorted[i].BBox.Y0-sorted[j].BBox.Y0) > 4 {
+			return sorted[i].BBox.Y0 > sorted[j].BBox.Y0
+		}
+		return sorted[i].BBox.X0 < sorted[j].BBox.X0
+	})
+
+	var out []idm.Block
+	var list []bool
+	for _, b := range sorted {
+		if n := len(out); n > 0 {
+			prev := &out[n-1]
+			if sameLine(*prev, b) && closeTogether(*prev, b) {
+				appendText(prev, " "+b.Text)
+				prev.BBox = unionRect(prev.BBox, b.BBox)
+				prev.FontSize = math.Max(prev.FontSize, b.FontSize)
+				list[n-1] = list[n-1] || leaderOnly(b.Text)
+				continue
+			}
+		}
+		out = append(out, b)
+		list = append(list, leaderOnly(b.Text))
+	}
+
+	// A contents entry is not a line of prose. Marking it as a list keeps the
+	// paragraph stage from joining entry above entry into one run-on block.
+	for i := range out {
+		if list[i] {
+			out[i].Kind = idm.KindList
+		}
+	}
+	return out
+}
+
+// sameLine reports whether two blocks sit on one baseline.
+func sameLine(a, b idm.Block) bool {
+	// A contents page right-aligns its page numbers, and producers often set
+	// that column a couple of points off the entry's baseline.
+	return a.Page == b.Page && math.Abs(a.BBox.Y0-b.BBox.Y0) <= 4
+}
+
+// closeTogether reports whether two blocks on one line are separated by less
+// than a column gutter.
+func closeTogether(a, b idm.Block) bool {
+	font := math.Max(a.FontSize, b.FontSize)
+	if font <= 0 {
+		return false
+	}
+	gap := b.BBox.X0 - a.BBox.X1
+	return gap >= -2 && gap <= 1.5*font
+}
+
+// appendText adds text to a block and keeps its spans consistent.
+func appendText(b *idm.Block, text string) {
+	b.Text += text
+	if len(b.Spans) == 0 {
+		return
+	}
+	b.Spans = append(b.Spans, idm.Span{Text: text})
+}
+
+// leaderOnly reports whether text is nothing but leader dots and space.
+func leaderOnly(text string) bool {
+	sawDot := false
+	for _, r := range text {
+		switch r {
+		case '.', '\u00b7', '\u2026':
+			sawDot = true
+		case ' ', '\t':
+		default:
+			return false
+		}
+	}
+	return sawDot
+}
+
+// endsWithLeader reports whether text ends in a run of leader dots.
+func endsWithLeader(text string) bool {
+	trimmed := strings.TrimRight(text, " \t")
+	return strings.HasSuffix(trimmed, "..") || strings.HasSuffix(trimmed, "\u2026")
+}
+
+func unionRect(a, b idm.Rect) idm.Rect {
+	return idm.Rect{
+		X0: math.Min(a.X0, b.X0),
+		Y0: math.Min(a.Y0, b.Y0),
+		X1: math.Max(a.X1, b.X1),
+		Y1: math.Max(a.Y1, b.Y1),
+	}
 }
 
 // orderPage puts one page's blocks into reading order.
@@ -481,7 +600,7 @@ func clampInt(v, lo, hi int) int {
 // a running header or footer can live. Five percent is a header at 95% of the
 // page; anything further in is body text, and treating it as furniture silently
 // deletes content.
-const furnitureZone = 0.95
+const furnitureZone = 0.94
 
 // markFurniture flags running headers and footers in place.
 //
@@ -499,7 +618,14 @@ func markFurniture(byPage [][]idm.Block, pages []idm.Page) {
 	}
 
 	seen := make(map[key]map[int]bool)
-	threshold := (len(pages) + 1) / 2
+
+	// A third of the pages, not half: books alternate their running heads
+	// ("THE BOOK TITLE" on verso, the author on recto), so each variant covers
+	// only half the pages and a half-page threshold rejects both.
+	threshold := (len(pages) + 2) / 3
+	if len(pages) >= 3 && threshold < 2 {
+		threshold = 2
+	}
 
 	for pageIndex, blocks := range byPage {
 		page := pages[pageIndex]

@@ -240,3 +240,14 @@ func TestApplyKeepsSpansConsistentWithText(t *testing.T) {
 		t.Errorf("italic run = %+v, want the ligature repaired inside it", spans[1])
 	}
 }
+
+func TestJoinLinesKeepsASeparatorDash(t *testing.T) {
+	// A dash with a space before it separates words; gluing it to the next
+	// word ("2026 -Present") changes the text a reader sees.
+	if got := JoinLines("Jun 2026 -", "Present"); got != "Jun 2026 - Present" {
+		t.Errorf("separator dash = %q", got)
+	}
+	if got := JoinLines("-", "Present"); got != "- Present" {
+		t.Errorf("standalone dash = %q", got)
+	}
+}
