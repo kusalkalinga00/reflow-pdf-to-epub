@@ -59,10 +59,9 @@ func Apply(doc idm.Document) idm.Document {
 // joinLeaderRuns rebuilds table-of-contents lines.
 //
 // A TOC row is text, then a run of dots set as one text object per dot, then a
-// page number. PDFium reports each as its own block, so without this a table of
-// contents becomes one paragraph per dot. The page is recognised by having at
-// least two leader runs; on those pages, blocks that share a baseline and sit
-// close together are one line.
+// page number. PDFium reports each as its own block, and the page-number
+// column is often set a couple of points off the entry's baseline, so the row
+// is grouped by baseline first and only then joined left to right.
 func joinLeaderRuns(blocks []idm.Block) []idm.Block {
 	leaders := 0
 	for _, b := range blocks {
@@ -74,8 +73,6 @@ func joinLeaderRuns(blocks []idm.Block) []idm.Block {
 		return blocks
 	}
 
-	// Pieces of a row can arrive interleaved with the next row's dots, so
-	// group by baseline before joining. orderPage re-sorts afterwards.
 	sorted := append([]idm.Block(nil), blocks...)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		if math.Abs(sorted[i].BBox.Y0-sorted[j].BBox.Y0) > 4 {
@@ -85,30 +82,57 @@ func joinLeaderRuns(blocks []idm.Block) []idm.Block {
 	})
 
 	var out []idm.Block
-	var list []bool
-	for _, b := range sorted {
-		if n := len(out); n > 0 {
-			prev := &out[n-1]
-			if sameLine(*prev, b) && closeTogether(*prev, b) {
-				appendText(prev, " "+b.Text)
-				prev.BBox = unionRect(prev.BBox, b.BBox)
-				prev.FontSize = math.Max(prev.FontSize, b.FontSize)
-				list[n-1] = list[n-1] || leaderOnly(b.Text)
-				continue
-			}
+	for start := 0; start < len(sorted); {
+		end := start + 1
+		for end < len(sorted) && sameLine(sorted[start], sorted[end]) {
+			end++
 		}
-		out = append(out, b)
-		list = append(list, leaderOnly(b.Text))
-	}
-
-	// A contents entry is not a line of prose. Marking it as a list keeps the
-	// paragraph stage from joining entry above entry into one run-on block.
-	for i := range out {
-		if list[i] {
-			out[i].Kind = idm.KindList
-		}
+		out = append(out, joinRow(sorted[start:end])...)
+		start = end
 	}
 	return out
+}
+
+// joinRow joins one baseline's blocks into a single contents entry.
+func joinRow(row []idm.Block) []idm.Block {
+	if len(row) == 0 {
+		return nil
+	}
+	sort.SliceStable(row, func(i, j int) bool { return row[i].BBox.X0 < row[j].BBox.X0 })
+
+	// The dots are 1-2pt tall, so the gap limit has to come from the entry's
+	// text, not from the punctuation between the dot pairs.
+	font := 0.0
+	for _, b := range row {
+		if !leaderOnly(b.Text) && b.FontSize > font {
+			font = b.FontSize
+		}
+	}
+	if font <= 0 {
+		for _, b := range row {
+			if b.FontSize > font {
+				font = b.FontSize
+			}
+		}
+	}
+
+	merged := row[0]
+	leader := leaderOnly(merged.Text)
+	for _, b := range row[1:] {
+		if closeTogether(merged, b, font) {
+			appendText(&merged, " "+b.Text)
+			merged.BBox = unionRect(merged.BBox, b.BBox)
+			merged.FontSize = math.Max(merged.FontSize, b.FontSize)
+			leader = leader || leaderOnly(b.Text)
+			continue
+		}
+		break
+	}
+
+	if leader {
+		merged.Kind = idm.KindList
+	}
+	return []idm.Block{merged}
 }
 
 // sameLine reports whether two blocks sit on one baseline.
@@ -119,14 +143,13 @@ func sameLine(a, b idm.Block) bool {
 }
 
 // closeTogether reports whether two blocks on one line are separated by less
-// than a column gutter.
-func closeTogether(a, b idm.Block) bool {
-	font := math.Max(a.FontSize, b.FontSize)
+// than a column gutter, measured against the line's text size.
+func closeTogether(a, b idm.Block, font float64) bool {
 	if font <= 0 {
 		return false
 	}
 	gap := b.BBox.X0 - a.BBox.X1
-	return gap >= -2 && gap <= 1.5*font
+	return gap >= -2 && gap <= 1.75*font
 }
 
 // appendText adds text to a block and keeps its spans consistent.

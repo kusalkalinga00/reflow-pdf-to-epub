@@ -570,3 +570,33 @@ func TestContentsDotLeadersBecomeOneLinePerEntry(t *testing.T) {
 		t.Errorf("first entry = %q", entries[0].Text)
 	}
 }
+
+func TestContentsRowJoinsAcrossAWideLeaderGap(t *testing.T) {
+	// Alice's contents sets the leader run 15pt after a 9.5pt entry: more than
+	// one and a half ems, but still the same line. Judged by the dots' own
+	// 1.8pt height the row never joins, and the reader gets a page of dots.
+	blocks := []idm.Block{
+		block("The Pool of Tears", 1, 54, 471, 150.7, 480.5),
+		block("A Caucus-Race", 1, 54, 450, 140, 459),
+	}
+	x := 165.7
+	for x < 340 {
+		dot := block(".", 1, x, 471.17, x+2.7, 473)
+		dot.FontSize = 1.8
+		blocks = append(blocks, dot)
+		x += 7.6
+	}
+	blocks = append(blocks, block(". 20", 1, 340.8, 471.17, 365, 480))
+
+	out := Apply(document(1, blocks...))
+
+	for _, b := range out.Blocks {
+		if b.Kind == idm.KindList && strings.HasPrefix(b.Text, "The Pool of Tears") {
+			if !strings.HasSuffix(b.Text, " 20") {
+				t.Errorf("row = %q, want the page number joined", b.Text)
+			}
+			return
+		}
+	}
+	t.Fatalf("row was not joined: %v", texts(out.Blocks))
+}
