@@ -2,6 +2,7 @@ package layout
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/kusalkalinga00/reflow-pdf-to-epub/internal/idm"
@@ -484,5 +485,88 @@ func TestFurnitureRepeatedOnConsecutivePagesIsRemoved(t *testing.T) {
 		if b.Text == "Only here" && b.Kind.IsFurniture() {
 			t.Error("a footer on two pages was removed; three is the threshold")
 		}
+	}
+}
+
+func TestAlternatingRunningHeadsAndFoliosAreRemoved(t *testing.T) {
+	// Real books alternate their running heads: the title on verso, the author
+	// on recto. Each variant covers only half the pages, and the folio's digits
+	// differ every page, so both need masking rather than exact repetition.
+	var blocks []idm.Block
+	for p := 1; p <= 6; p++ {
+		head := "The Great Gatsby"
+		if p%2 == 0 {
+			head = "F. SCOTT FITZGERALD"
+		}
+		blocks = append(blocks,
+			block(head, p, 200, 800, 380, 810),
+			block("Body text on this page.", p, 72, 600, 520, 612),
+			block(string(rune('0'+p)), p, 300, 30, 320, 40),
+		)
+	}
+
+	out := Apply(document(6, blocks...))
+
+	var heads, folios, bodies int
+	for _, b := range out.Blocks {
+		switch {
+		case b.Kind.IsFurniture():
+			heads++
+		case b.Text == "Body text on this page.":
+			bodies++
+		case len(b.Text) == 1 && b.Text[0] >= '1' && b.Text[0] <= '9':
+			folios++
+		}
+	}
+	if heads == 0 {
+		t.Error("no running head was removed")
+	}
+	if folios != 0 {
+		t.Errorf("%d folios survived", folios)
+	}
+	if bodies != 6 {
+		t.Errorf("body blocks = %d, want 6", bodies)
+	}
+}
+
+func TestContentsDotLeadersBecomeOneLinePerEntry(t *testing.T) {
+	blocks := []idm.Block{
+		block("Contents", 1, 72, 780, 200, 790),
+	}
+	// Two contents rows: text, one run per dot, then the right-aligned page
+	// number, set two points off the entry's baseline.
+	for i, entry := range []struct {
+		text string
+		page string
+		y    float64
+	}{
+		{"Dedication", "1", 600},
+		{"Epigraph", "2", 560},
+	} {
+		blocks = append(blocks, block(entry.text, 1, 62, entry.y, 116, entry.y+9))
+		x := 124.0
+		for x < 348 {
+			dot := block(".", 1, x, entry.y, x+2, entry.y+1.1)
+			dot.FontSize = 1.1
+			blocks = append(blocks, dot)
+			x += 6.5
+		}
+		num := block(". "+entry.page, 1, 358, entry.y+2.7-float64(i), 373, entry.y+9)
+		blocks = append(blocks, num)
+	}
+
+	out := Apply(document(1, blocks...))
+
+	var entries []idm.Block
+	for _, b := range out.Blocks {
+		if b.Kind == idm.KindList {
+			entries = append(entries, b)
+		}
+	}
+	if len(entries) != 2 {
+		t.Fatalf("contents entries = %d, want 2: %v", len(entries), texts(out.Blocks))
+	}
+	if !strings.HasPrefix(entries[0].Text, "Dedication . . .") || !strings.HasSuffix(entries[0].Text, " 1") {
+		t.Errorf("first entry = %q", entries[0].Text)
 	}
 }
