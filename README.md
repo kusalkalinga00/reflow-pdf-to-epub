@@ -314,8 +314,7 @@ docker compose up -d --build
 Then open <http://localhost:8080>, drop in a PDF, press **Convert**, and the EPUB downloads with
 its quality report. `docker compose logs -f` shows progress; `docker compose down` stops it.
 
-Release tags publish a prebuilt multi-arch image, so you can skip the build
-entirely once a release exists:
+A prebuilt multi-arch image is published, so you can skip the build entirely:
 
 ```sh
 docker run --rm -p 127.0.0.1:8080:8080 \
@@ -326,15 +325,10 @@ The image is about 650 MB: PDFium, Tesseract and a headless JRE. OCR is English
 by default — extend the image with `tesseract-ocr-<lang>` for more languages.
 `/healthz` answers for proxies and orchestrators.
 
-A GitHub package starts private even when the repository is public. To let
-anyone pull the image, open the package's settings and change its visibility
-once (GitHub → your profile → Packages → the image → *Change visibility*).
-
-While the package is **private**, it counts against the Free plan's 500 MB of
-Packages storage — shared with Actions caches — and the multi-arch image is
-about 350 MB compressed. That is why images are published on release tags
-rather than on every push. Once the repository and the package are public,
-image storage and transfer are free.
+The package is public, so no login is needed to pull it. Images are published
+from `main` on demand (`gh workflow run edge.yml`) rather than on every push:
+the multi-arch build takes about fifteen minutes, and the same machines are
+better spent on the test suite.
 
 ### Running it safely
 
