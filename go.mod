@@ -4,9 +4,9 @@ go 1.27.4
 
 require (
 	github.com/beevik/etree v1.8.1
-	github.com/klippa-app/go-pdfium v1.21.4
+	github.com/klippa-app/go-pdfium v1.21.5
 	github.com/pdfcpu/pdfcpu v0.16.4
-	golang.org/x/image v0.47.0
+	golang.org/x/image v0.48.0
 	golang.org/x/text v0.44.0
 )
 
